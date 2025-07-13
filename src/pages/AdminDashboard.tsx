@@ -13,6 +13,7 @@ import { UserManagement } from '@/components/admin/UserManagement';
 import { DataVisualization } from '@/components/admin/DataVisualization';
 import { BluetoothScaleIntegration } from '@/components/admin/BluetoothScaleIntegration';
 import { BluetoothUserManagement } from '@/components/admin/BluetoothUserManagement';
+import { MiScalePairingButton } from '@/components/admin/MiScalePairingButton';
 import { 
   Users, 
   Video, 
@@ -275,6 +276,36 @@ export const AdminDashboard: React.FC = () => {
           </TabsContent>
 
           <TabsContent value="bluetooth" className="space-y-6">
+            {/* Botão de Destaque para Parear Balança */}
+            <Card className="bg-gradient-to-r from-instituto-orange/10 to-instituto-purple/10 border-instituto-orange/50">
+              <CardHeader>
+                <CardTitle className="text-netflix-text flex items-center gap-2">
+                  <Scale className="h-6 w-6 text-instituto-orange" />
+                  Pareamento da Mi Body Composition Scale 2
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
+                  <div>
+                    <h3 className="text-lg font-semibold text-netflix-text mb-2">
+                      Conectar Balança Inteligente
+                    </h3>
+                    <p className="text-netflix-text-muted">
+                      Use o protocolo Web Bluetooth para conectar diretamente com sua balança Xiaomi Mi e capturar dados em tempo real.
+                    </p>
+                  </div>
+                  <MiScalePairingButton 
+                    onDeviceFound={(device) => {
+                      console.log('Dispositivo encontrado:', device);
+                    }}
+                    onConnected={(device) => {
+                      console.log('Dispositivo conectado:', device);
+                    }}
+                  />
+                </div>
+              </CardContent>
+            </Card>
+
             <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
               {/* BLOCO 1: Integração Bluetooth */}
               <div className="space-y-6">
