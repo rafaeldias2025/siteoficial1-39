@@ -5,7 +5,8 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Scale, Ruler, Bluetooth, CheckCircle, Timer } from 'lucide-react';
+import { Scale, Ruler, Bluetooth, CheckCircle, Timer, X, User } from 'lucide-react';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useDadosSaude, DadosSaude } from '@/hooks/useDadosSaude';
 import { useToast } from '@/hooks/use-toast';
 import { supabase } from '@/integrations/supabase/client';
@@ -43,6 +44,10 @@ export const AtualizarMedidasModal: React.FC<AtualizarMedidasModalProps> = ({ tr
   const [scaleData, setScaleData] = useState<ScaleData | null>(null);
   const [countdown, setCountdown] = useState(0);
   const [activeTab, setActiveTab] = useState('manual');
+  const [isWaitingStabilization, setIsWaitingStabilization] = useState(false);
+  const [lastReadings, setLastReadings] = useState<number[]>([]);
+  const [selectedUserId, setSelectedUserId] = useState<string>('');
+  const [availableUsers, setAvailableUsers] = useState<any[]>([]);
 
   useEffect(() => {
     if (countdown > 0) {
@@ -50,6 +55,22 @@ export const AtualizarMedidasModal: React.FC<AtualizarMedidasModalProps> = ({ tr
       return () => clearTimeout(timer);
     }
   }, [countdown]);
+
+  // Carregar usuários disponíveis
+  useEffect(() => {
+    const loadUsers = async () => {
+      if (user) {
+        const { data } = await supabase
+          .from('profiles')
+          .select('id, full_name, email')
+          .order('full_name');
+        
+        setAvailableUsers(data || []);
+        setSelectedUserId(user.id); // Selecionar usuário atual por padrão
+      }
+    };
+    loadUsers();
+  }, [user]);
 
   // Atualizar formulário quando dados da balança chegarem
   useEffect(() => {
@@ -73,13 +94,13 @@ export const AtualizarMedidasModal: React.FC<AtualizarMedidasModalProps> = ({ tr
       meta_peso_kg: dadosSaude?.meta_peso_kg || parseFloat(formData.peso_atual_kg.toString())
     };
 
-    // Se há dados da balança, salvar também na tabela de pesagens
-    if (scaleData && user) {
+    // Se há dados da balança, salvar na tabela de pesagens para o usuário selecionado
+    if (scaleData && selectedUserId) {
       try {
         await supabase
           .from('pesagens')
           .insert({
-            user_id: user.id,
+            user_id: selectedUserId,
             peso_kg: scaleData.weight,
             gordura_corporal_pct: scaleData.bodyFat,
             massa_muscular_kg: scaleData.muscleMass,
@@ -89,8 +110,19 @@ export const AtualizarMedidasModal: React.FC<AtualizarMedidasModalProps> = ({ tr
             data_medicao: scaleData.timestamp.toISOString(),
             origem_medicao: 'balança_bluetooth_usuario'
           });
+
+        const selectedUser = availableUsers.find(u => u.id === selectedUserId);
+        toast({
+          title: "✅ Dados salvos!",
+          description: `Pesagem registrada para ${selectedUser?.full_name || 'usuário'}`,
+        });
       } catch (error) {
         console.error('Erro ao salvar dados da balança:', error);
+        toast({
+          title: "Erro ao salvar",
+          description: "Não foi possível salvar os dados da balança",
+          variant: "destructive",
+        });
       }
     }
 
@@ -101,6 +133,8 @@ export const AtualizarMedidasModal: React.FC<AtualizarMedidasModalProps> = ({ tr
     setIsConnected(false);
     setDevice(null);
     setCountdown(0);
+    setIsWaitingStabilization(false);
+    setLastReadings([]);
     
     setOpen(false);
     
@@ -199,25 +233,30 @@ export const AtualizarMedidasModal: React.FC<AtualizarMedidasModalProps> = ({ tr
       }
 
       setIsConnected(true);
-      setCountdown(15);
+      setCountdown(30);
+      setIsWaitingStabilization(false);
+      setLastReadings([]);
       
       toast({
         title: "✅ Balança Conectada!",
-        description: "Aguardando pesagem: suba na balança em até 5 segundos",
+        description: "Suba na balança e aguarde a estabilização do peso",
       });
 
-      // CORREÇÃO: Timer que realmente funciona
-      let timeLeft = 15;
+      // Timer estendido para aguardar estabilização real
+      let timeLeft = 30;
       const timer = setInterval(() => {
         timeLeft--;
         setCountdown(timeLeft);
         
         if (timeLeft <= 0) {
           clearInterval(timer);
-          // Se não recebeu dados reais, simular
           if (!scaleData) {
-            console.log('Tempo esgotado, simulando leitura...');
-            simulateAccurateReading();
+            toast({
+              title: "⏰ Tempo esgotado",
+              description: "Não foi possível capturar dados estabilizados. Tente novamente.",
+              variant: "destructive",
+            });
+            cancelMeasurement();
           }
         }
       }, 1000);
@@ -243,52 +282,92 @@ export const AtualizarMedidasModal: React.FC<AtualizarMedidasModalProps> = ({ tr
       console.log('Hex:', hexData);
       
       // PROTOCOLO OFICIAL Xiaomi Mi Body Composition Scale 2
-      // Baseado no openScale: https://github.com/oliexdev/openScale
-      // Weight Measurement Characteristic (UUID: 2a9d)
+      // Aguardar estabilização REAL dos dados
       
       if (value.byteLength < 3) {
         console.log('❌ Dados insuficientes');
         return;
       }
 
-      // Mi Scale 2 - Protocolo oficial
-      // Peso está nos bytes 1-2 (offset 1), little endian, dividido por 200
-      const weightRaw = value.getUint16(1, true); // little endian
-      const weight = weightRaw / 200; // Divisão EXATA da Mi Scale 2
+      // Mi Scale 2 - Leitura dos flags de status
+      const flags = value.getUint8(0);
+      const weightUnit = (flags & 0x01) === 0 ? 'kg' : 'lb';
+      const timestampPresent = (flags & 0x02) !== 0;
+      const userIdPresent = (flags & 0x04) !== 0;
+      const bmiPresent = (flags & 0x08) !== 0;
+      const stabilized = (flags & 0x20) !== 0; // Flag de estabilização
       
-      console.log(`📊 Mi Scale 2 OFICIAL - Raw: ${weightRaw}, Peso: ${weight}kg`);
+      console.log('🔍 Flags de status:', {
+        stabilized,
+        weightUnit,
+        timestampPresent,
+        userIdPresent,
+        bmiPresent
+      });
+
+      // ✅ AGUARDAR ESTABILIZAÇÃO REAL
+      if (!stabilized) {
+        console.log('⏳ Peso ainda não estabilizou, aguardando...');
+        setIsWaitingStabilization(true);
+        return;
+      }
+
+      // Mi Scale 2 - Peso estabilizado nos bytes 1-2 (offset 1), little endian
+      const weightRaw = value.getUint16(1, true);
+      let weight = weightRaw / (weightUnit === 'kg' ? 200 : 100);
       
-      // Validação de peso realista para humanos
+      // Converter libras para kg se necessário
+      if (weightUnit === 'lb') {
+        weight = weight * 0.453592;
+      }
+      
+      console.log(`📊 Mi Scale 2 ESTABILIZADO - Raw: ${weightRaw}, Peso: ${weight}kg`);
+      
+      // Validação de peso realista
       if (weight < 10 || weight > 300) {
         console.log('❌ Peso fora do range humano válido:', weight);
         return;
       }
 
-      // Composição corporal (se disponível nos dados)
+      // ✅ ALGORITMO DE ESTABILIZAÇÃO ADICIONAL
+      // Aguardar 3 leituras consecutivas com variação < 0.1kg
+      const newReadings = [...lastReadings, weight];
+      if (newReadings.length > 3) {
+        newReadings.shift(); // Manter apenas as 3 últimas
+      }
+      setLastReadings(newReadings);
+
+      if (newReadings.length === 3) {
+        const maxVariation = Math.max(...newReadings) - Math.min(...newReadings);
+        if (maxVariation > 0.1) {
+          console.log('⏳ Peso ainda variando, aguardando estabilização completa...', newReadings);
+          return;
+        }
+        // Usar a média das 3 leituras para maior precisão
+        weight = newReadings.reduce((a, b) => a + b, 0) / newReadings.length;
+      } else {
+        console.log('⏳ Coletando leituras para estabilização...', newReadings);
+        return;
+      }
+
+      setIsWaitingStabilization(false);
+
+      // Composição corporal com dados reais da balança
       let bodyFat = 0;
       let muscleMass = 0;
       let bodyWater = 0;
       let impedance = 0;
 
-      // Mi Scale 2 envia dados de impedância em bytes específicos
+      // Mi Scale 2 envia dados de impedância nos bytes específicos
       if (value.byteLength >= 13) {
-        // Impedância está nos bytes 9-10 (protocolo Mi Scale 2)
         impedance = value.getUint16(9, true);
         
-        // Estimativas baseadas na impedância real da Mi Scale 2
         if (impedance > 0) {
-          // Fórmulas simplificadas baseadas na impedância
+          // Fórmulas baseadas no protocolo Mi Scale 2
           bodyFat = Math.max(5, Math.min(50, 15 + (impedance / 100)));
           bodyWater = Math.max(30, Math.min(70, 55 + (impedance / 200)));
           muscleMass = Math.max(weight * 0.2, weight * 0.6);
         }
-      }
-
-      // Se não temos dados de impedância, usar estimativas
-      if (impedance === 0) {
-        bodyFat = 15 + (Math.random() * 15); // 15-30%
-        bodyWater = 50 + (Math.random() * 15); // 50-65%
-        muscleMass = weight * (0.3 + Math.random() * 0.2); // 30-50% do peso
       }
 
       const realData: ScaleData = {
@@ -300,21 +379,22 @@ export const AtualizarMedidasModal: React.FC<AtualizarMedidasModalProps> = ({ tr
         timestamp: new Date()
       };
 
-      // Cálculo preciso do IMC
+      // Cálculo do IMC
       const height = dadosSaude?.altura_cm || 170;
       const heightM = height / 100;
       realData.bmi = Math.round((realData.weight / (heightM * heightM)) * 10) / 10;
       
       setScaleData(realData);
-      setCountdown(0); // Para o countdown imediatamente
+      setCountdown(0);
+      setLastReadings([]);
       
       toast({
-        title: "✅ Mi Scale 2 - Dados Reais!",
-        description: `Peso: ${realData.weight}kg | IMC: ${realData.bmi} | Impedância: ${impedance}Ω`,
-        duration: 6000,
+        title: "✅ Mi Scale 2 - Peso Estabilizado!",
+        description: `Peso final: ${realData.weight}kg | IMC: ${realData.bmi} | Impedância: ${impedance}Ω`,
+        duration: 8000,
       });
       
-      console.log('✅ Dados processados com sucesso:', realData);
+      console.log('✅ Dados estabilizados processados:', realData);
       
     } catch (error) {
       console.error('❌ Erro ao processar dados da Mi Scale:', error);
@@ -326,33 +406,20 @@ export const AtualizarMedidasModal: React.FC<AtualizarMedidasModalProps> = ({ tr
     }
   };
 
-  const simulateAccurateReading = () => {
-    // Simulação igual ao padrão Mi Scale 2
-    const baseWeight = 60 + (Math.random() * 40); // 60-100kg
-    const weightRaw = Math.round(baseWeight * 100); // Simula valor bruto
-    const weight = weightRaw / 100; // Divisão correta
-    
-    console.log(`Simulação - Raw: ${weightRaw}, Weight: ${weight}kg`);
-
-    const mockData: ScaleData = {
-      weight: Math.round(weight * 100) / 100,
-      bodyFat: Math.round((15 + Math.random() * 15) * 10) / 10,
-      muscleMass: Math.round((weight * 0.35) * 10) / 10,
-      bodyWater: Math.round((55 + Math.random() * 10) * 10) / 10,
-      basalMetabolism: Math.round(1300 + (weight * 12)),
-      timestamp: new Date()
-    };
-
-    const height = dadosSaude?.altura_cm || 170;
-    const heightM = height / 100;
-    mockData.bmi = Math.round((mockData.weight / (heightM * heightM)) * 10) / 10;
-
-    setScaleData(mockData);
+  const cancelMeasurement = () => {
+    if (device && device.gatt?.connected) {
+      device.gatt.disconnect();
+    }
+    setIsConnected(false);
+    setDevice(null);
+    setScaleData(null);
     setCountdown(0);
-
+    setIsWaitingStabilization(false);
+    setLastReadings([]);
+    
     toast({
-      title: "📊 Simulação Mi Scale 2",
-      description: `Peso: ${mockData.weight}kg - IMC: ${mockData.bmi}`,
+      title: "❌ Medição cancelada",
+      description: "Conexão com a balança foi encerrada",
     });
   };
 
@@ -391,6 +458,26 @@ export const AtualizarMedidasModal: React.FC<AtualizarMedidasModalProps> = ({ tr
                 </CardTitle>
               </CardHeader>
               <CardContent className="space-y-4">
+                {/* Seleção de Usuário */}
+                <div className="space-y-2">
+                  <Label className="flex items-center gap-2">
+                    <User className="h-4 w-4" />
+                    Usuário para registrar a pesagem
+                  </Label>
+                  <Select value={selectedUserId} onValueChange={setSelectedUserId}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Selecione o usuário" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {availableUsers.map((userOption) => (
+                        <SelectItem key={userOption.id} value={userOption.id}>
+                          {userOption.full_name || userOption.email}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
                 {/* Status da Conexão */}
                 <div className="flex items-center justify-between p-4 bg-muted rounded-lg">
                   <div className="flex items-center gap-3">
@@ -406,55 +493,78 @@ export const AtualizarMedidasModal: React.FC<AtualizarMedidasModalProps> = ({ tr
                       <p className="text-sm text-muted-foreground">
                         {isConnected 
                           ? countdown > 0 
-                            ? `Aguardando pesagem: ${countdown}s`
-                            : 'Medição em andamento...'
-                          : 'Clique para conectar'
+                            ? isWaitingStabilization
+                              ? `Aguardando estabilização... ${countdown}s`
+                              : `Suba na balança: ${countdown}s`
+                            : 'Medição finalizada'
+                          : 'Selecione um usuário e conecte'
                         }
                       </p>
                     </div>
                   </div>
                   <div className={`w-3 h-3 rounded-full ${
-                    isConnected ? 'bg-green-500 animate-pulse' : 'bg-muted-foreground'
+                    isConnected 
+                      ? isWaitingStabilization 
+                        ? 'bg-yellow-500 animate-pulse' 
+                        : 'bg-green-500 animate-pulse' 
+                      : 'bg-muted-foreground'
                   }`} />
                 </div>
 
-                {/* Botão de Ação */}
+                {/* Botões de Ação */}
                 {!isConnected ? (
                   <Button 
                     onClick={startPairing}
-                    disabled={isScanning}
+                    disabled={isScanning || !selectedUserId}
                     className="w-full bg-instituto-purple hover:bg-instituto-purple/80"
                     size="lg"
                   >
                     {isScanning ? (
                       <>
                         <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2" />
-                        Procurando...
+                        Procurando balança...
                       </>
                     ) : (
                       <>
                         <Scale className="h-4 w-4 mr-2" />
-                        Iniciar Pareamento com Balança
+                        Conectar Mi Scale 2
                       </>
                     )}
                   </Button>
                 ) : (
-                  <div className="text-center">
-                    {countdown > 0 ? (
-                      <div className="space-y-2">
-                        <div className="flex items-center justify-center gap-2 text-lg font-bold text-instituto-purple">
-                          <Timer className="h-5 w-5" />
-                          {countdown}s
+                  <div className="space-y-3">
+                    <div className="text-center">
+                      {countdown > 0 ? (
+                        <div className="space-y-2">
+                          <div className="flex items-center justify-center gap-2 text-lg font-bold text-instituto-purple">
+                            <Timer className="h-5 w-5" />
+                            {countdown}s
+                          </div>
+                          <p className="text-sm text-muted-foreground">
+                            {isWaitingStabilization 
+                              ? "⏳ Aguardando peso estabilizar..."
+                              : countdown > 20 
+                                ? "🔵 Suba na balança agora"
+                                : "⚖️ Mantenha-se na balança até estabilizar"
+                            }
+                          </p>
                         </div>
-                        <p className="text-sm text-muted-foreground">
-                          {countdown > 10 ? "Suba na balança em até 5 segundos" : "Medição automática em 10 segundos"}
+                      ) : (
+                        <p className="text-instituto-purple font-medium">
+                          Finalizando medição...
                         </p>
-                      </div>
-                    ) : (
-                      <p className="text-instituto-purple font-medium">
-                        Processando medição...
-                      </p>
-                    )}
+                      )}
+                    </div>
+                    
+                    <Button 
+                      onClick={cancelMeasurement}
+                      variant="outline"
+                      size="sm"
+                      className="w-full border-red-200 text-red-600 hover:bg-red-50"
+                    >
+                      <X className="h-4 w-4 mr-2" />
+                      Cancelar Medição
+                    </Button>
                   </div>
                 )}
 
