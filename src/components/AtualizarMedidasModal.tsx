@@ -379,12 +379,6 @@ export const AtualizarMedidasModal: React.FC<AtualizarMedidasModalProps> = ({ tr
       const value = target.value as DataView;
       const characteristicUuid = target.characteristic?.uuid || 'unknown';
       
-      console.log('🎯 DADOS RECEBIDOS:', {
-        uuid: characteristicUuid,
-        bytes: value?.byteLength || 0,
-        pesando: isWeighing
-      });
-      
       if (!value || value.byteLength === 0) {
         console.log('❌ Dados vazios recebidos');
         return;
@@ -394,74 +388,87 @@ export const AtualizarMedidasModal: React.FC<AtualizarMedidasModalProps> = ({ tr
       const bytes = Array.from(new Uint8Array(value.buffer));
       const hexString = bytes.map(b => b.toString(16).padStart(2, '0')).join(' ');
       
+      console.log('🎯 DADOS COMPLETOS RECEBIDOS:');
       console.log('📊 BYTES:', bytes);
       console.log('🔤 HEX:', hexString);
+      console.log('🔢 DECIMAL:', bytes.join(', '));
+      console.log('⚖️ Estado pesando:', isWeighing);
 
       let weight = 0;
-      let isStable = false;
-      let impedance = 0;
+      let isValidWeight = false;
 
-      // PROTOCOLO SIMPLES E ROBUSTO - BASEADO EM PROJETOS REAIS
+      // ANÁLISE COMPLETA DE DADOS - PROTOCOLO Mi Scale 2
       try {
         if (value.byteLength >= 13) {
-          // Mi Scale 2 padrão - Protocolo mais comum
           
           // Byte 0: Flags de controle  
           const controlByte = value.getUint8(0);
-          console.log(`🏁 Control Byte: 0x${controlByte.toString(16)}`);
-          
-          // Verificar se peso está estável (bit específico varia por modelo)
-          isStable = (controlByte & 0x20) !== 0 || (controlByte & 0x80) !== 0;
+          console.log(`🏁 Control Byte: 0x${controlByte.toString(16)} (${controlByte})`);
           
           // Peso principal - Bytes 1-2 (little endian)
           const weightRaw = value.getUint16(1, true);
           weight = weightRaw / 200; // Padrão Mi Scale
           
-          console.log(`⚖️ Peso RAW: ${weightRaw}, Convertido: ${weight.toFixed(2)}kg, Estável: ${isStable}`);
+          console.log(`⚖️ Peso RAW: ${weightRaw} → ${weight.toFixed(2)}kg`);
           
-          // Impedância - Bytes 9-10 ou 11-12 dependendo do modelo
-          if (value.byteLength >= 13) {
-            impedance = value.getUint16(9, true) || value.getUint16(11, true) || 0;
-            console.log(`⚡ Impedância: ${impedance}Ω`);
+          // TENTAR OUTRAS INTERPRETAÇÕES TAMBÉM
+          const weightAlt1 = weightRaw / 100;
+          const weightAlt2 = weightRaw / 1000;
+          const weightBE = value.getUint16(1, false) / 200;
+          
+          console.log(`🔄 Alternativas: ÷100=${weightAlt1.toFixed(2)}kg, ÷1000=${weightAlt2.toFixed(2)}kg, BE=${weightBE.toFixed(2)}kg`);
+          
+          // Escolher peso mais provável
+          const possibleWeights = [weight, weightAlt1, weightBE];
+          for (const w of possibleWeights) {
+            if (w >= 20 && w <= 200) {
+              weight = w;
+              isValidWeight = true;
+              console.log(`✅ PESO VÁLIDO ESCOLHIDO: ${weight.toFixed(2)}kg`);
+              break;
+            }
           }
           
-        } else if (value.byteLength >= 3) {
-          // Protocolo alternativo para outros modelos
-          const weightRaw = value.getUint16(1, true);
-          weight = weightRaw / 200;
-          isStable = true; // Assume estável para protocolos menores
+          if (!isValidWeight) {
+            console.log('❌ Nenhum peso válido nas interpretações');
+            return;
+          }
           
-          console.log(`⚖️ Protocolo alternativo - Peso: ${weight.toFixed(2)}kg`);
-        }
-
-        // VALIDAÇÃO ROBUSTA
-        if (weight < 5 || weight > 300 || isNaN(weight)) {
-          console.log(`❌ Peso inválido: ${weight}kg`);
+        } else {
+          console.log('⚠️ Dados insuficientes (menos que 13 bytes)');
           return;
         }
 
-        // ADICIONAR LEITURA APENAS SE ESTIVER PESANDO
-        if (isWeighing) {
-          const reading = { 
-            weight: Number(weight.toFixed(2)), 
-            timestamp: Date.now(),
-            stable: isStable,
-            impedance: impedance
-          };
+        // SEMPRE PROCESSAR PESO VÁLIDO - INDEPENDENTE DO ESTADO
+        if (isValidWeight) {
+          console.log(`🎉 PESO DETECTADO: ${weight.toFixed(2)}kg`);
           
-          const newReadings = [...lastReadings, reading];
-          setLastReadings(newReadings);
-          
-          console.log(`✅ LEITURA ADICIONADA: ${weight.toFixed(2)}kg (${newReadings.length} total)`);
-          
-          // Toast em tempo real
-          toast({
-            title: `⚖️ ${weight.toFixed(1)}kg ${isStable ? '✓' : '⏳'}`,
-            description: `${newReadings.length} leituras coletadas`,
-            duration: 800,
-          });
-        } else {
-          console.log(`📊 Peso detectado fora de pesagem: ${weight.toFixed(2)}kg`);
+          // Se estiver pesando, adicionar às leituras
+          if (isWeighing) {
+            const reading = { 
+              weight: Number(weight.toFixed(2)), 
+              timestamp: Date.now()
+            };
+            
+            const newReadings = [...lastReadings, reading];
+            setLastReadings(newReadings);
+            
+            console.log(`✅ LEITURA SALVA: ${weight.toFixed(2)}kg (Total: ${newReadings.length})`);
+            
+            toast({
+              title: `⚖️ ${weight.toFixed(1)}kg capturado`,
+              description: `${newReadings.length} leituras coletadas`,
+              duration: 1000,
+            });
+          } else {
+            // Mostrar peso mesmo fora da pesagem para debug
+            console.log(`📊 PESO FORA DE PESAGEM: ${weight.toFixed(2)}kg`);
+            toast({
+              title: `📊 Peso detectado: ${weight.toFixed(1)}kg`,
+              description: "Inicie a pesagem para capturar",
+              duration: 2000,
+            });
+          }
         }
 
       } catch (parseError) {
@@ -470,7 +477,6 @@ export const AtualizarMedidasModal: React.FC<AtualizarMedidasModalProps> = ({ tr
 
     } catch (error) {
       console.error('❌ ERRO CRÍTICO em handleWeightMeasurement:', error);
-      // Não fazer nada drástico, apenas logar o erro
     }
   };
 
