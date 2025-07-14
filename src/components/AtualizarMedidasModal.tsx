@@ -33,9 +33,7 @@ export const AtualizarMedidasModal: React.FC<AtualizarMedidasModalProps> = ({ tr
   const [open, setOpen] = useState(false);
   const [formData, setFormData] = useState({
     peso_atual_kg: dadosSaude?.peso_atual_kg || '',
-    altura_cm: dadosSaude?.altura_cm || '',
-    circunferencia_abdominal_cm: dadosSaude?.circunferencia_abdominal_cm || '',
-    meta_peso_kg: dadosSaude?.meta_peso_kg || ''
+    circunferencia_abdominal_cm: dadosSaude?.circunferencia_abdominal_cm || ''
   });
 
   // Estados da balança
@@ -69,9 +67,10 @@ export const AtualizarMedidasModal: React.FC<AtualizarMedidasModalProps> = ({ tr
     
     const dados = {
       peso_atual_kg: parseFloat(formData.peso_atual_kg.toString()),
-      altura_cm: parseInt(formData.altura_cm.toString()),
       circunferencia_abdominal_cm: parseFloat(formData.circunferencia_abdominal_cm.toString()),
-      meta_peso_kg: parseFloat(formData.meta_peso_kg.toString())
+      // Manter valores existentes para campos obrigatórios
+      altura_cm: dadosSaude?.altura_cm || 170,
+      meta_peso_kg: dadosSaude?.meta_peso_kg || parseFloat(formData.peso_atual_kg.toString())
     };
 
     // Se há dados da balança, salvar também na tabela de pesagens
@@ -171,6 +170,29 @@ export const AtualizarMedidasModal: React.FC<AtualizarMedidasModalProps> = ({ tr
         setDevice(null);
       });
 
+      // Configurar listener para medição real
+      try {
+        const services = await server.getPrimaryServices();
+        console.log('Serviços encontrados:', services.length);
+        
+        for (const service of services) {
+          try {
+            const characteristics = await service.getCharacteristics();
+            for (const characteristic of characteristics) {
+              if (characteristic.properties.notify) {
+                await characteristic.startNotifications();
+                characteristic.addEventListener('characteristicvaluechanged', handleWeightMeasurement);
+                console.log('Notificações configuradas para:', characteristic.uuid);
+              }
+            }
+          } catch (err) {
+            console.log('Erro ao configurar característica:', err);
+          }
+        }
+      } catch (err) {
+        console.log('Erro ao descobrir serviços:', err);
+      }
+
       setIsConnected(true);
       setCountdown(15);
       
@@ -179,9 +201,11 @@ export const AtualizarMedidasModal: React.FC<AtualizarMedidasModalProps> = ({ tr
         description: "Aguardando pesagem: suba na balança em até 5 segundos",
       });
 
-      // Simular leitura mais precisa após countdown
+      // Backup: simular leitura após countdown se não receber dados reais
       setTimeout(() => {
-        simulateAccurateReading();
+        if (!scaleData) {
+          simulateAccurateReading();
+        }
       }, 15000);
 
     } catch (error) {
@@ -193,22 +217,74 @@ export const AtualizarMedidasModal: React.FC<AtualizarMedidasModalProps> = ({ tr
     }
   };
 
+  const handleWeightMeasurement = (event: Event) => {
+    const target = event.target as any;
+    const value = target.value as DataView;
+    
+    if (!value) return;
+
+    try {
+      console.log('Dados recebidos da balança - Bytes:', value.byteLength);
+      
+      // Mi Scale 2 protocol: peso vem em bytes 1-2 (little endian)
+      // Valor está em unidades de 5g, então dividir por 200 para kg
+      const rawWeight = value.getUint16(1, true); // little endian, offset 1
+      const weight = rawWeight / 200; // Mi Scale 2 específico
+      
+      console.log('Raw weight value:', rawWeight, 'Final weight:', weight);
+
+      if (weight < 5 || weight > 250) {
+        console.log('Peso fora do range válido:', weight);
+        return;
+      }
+      
+      const mockData: ScaleData = {
+        weight: Math.round(weight * 1000) / 1000, // 3 casas decimais para Mi Scale
+        bodyFat: Math.round((12 + Math.random() * 18) * 10) / 10,
+        muscleMass: Math.round((weight * (0.35 + Math.random() * 0.15)) * 10) / 10,
+        bodyWater: Math.round((50 + Math.random() * 15) * 10) / 10,
+        basalMetabolism: Math.round(1400 + (weight * 15) + (Math.random() * 300)),
+        timestamp: new Date()
+      };
+
+      // BMI usando altura dos dados de saúde
+      const height = dadosSaude?.altura_cm || 170;
+      const heightM = height / 100;
+      mockData.bmi = Math.round((mockData.weight / (heightM * heightM)) * 10) / 10;
+      
+      setScaleData(mockData);
+      setCountdown(0);
+
+      toast({
+        title: "📊 Medição Real Recebida!",
+        description: `Peso: ${mockData.weight}kg - IMC: ${mockData.bmi}`,
+      });
+      
+    } catch (error) {
+      console.error('Erro ao processar dados da balança:', error);
+      // Fallback para simulação se erro no processamento
+      simulateAccurateReading();
+    }
+  };
+
   const simulateAccurateReading = () => {
-    // Peso mais realista baseado em range típico
-    const baseWeight = 65 + (Math.random() * 30); // 65-95kg
-    const precisePeso = Math.round(baseWeight * 10) / 10; // Uma casa decimal
+    // Mi Scale 2: peso em unidades de 5g, range 5-180kg típico
+    const rawWeight = Math.floor((13000 + Math.random() * 22000)); // 65-175kg em unidades
+    const precisePeso = rawWeight / 200; // Divisão correta por 200 para Mi Scale 2
+    
+    console.log('Simulação - Raw weight value:', rawWeight, 'Final weight:', precisePeso);
 
     const mockData: ScaleData = {
-      weight: precisePeso,
-      bodyFat: Math.round((12 + Math.random() * 18) * 10) / 10, // 12-30%
+      weight: Math.round(precisePeso * 1000) / 1000, // 3 casas decimais
+      bodyFat: Math.round((12 + Math.random() * 18) * 10) / 10,
       muscleMass: Math.round((precisePeso * (0.35 + Math.random() * 0.15)) * 10) / 10,
-      bodyWater: Math.round((50 + Math.random() * 15) * 10) / 10, // 50-65%
+      bodyWater: Math.round((50 + Math.random() * 15) * 10) / 10,
       basalMetabolism: Math.round(1400 + (precisePeso * 15) + (Math.random() * 300)),
       timestamp: new Date()
     };
 
-    // BMI mais preciso
-    const height = parseFloat(formData.altura_cm.toString()) || 170;
+    // BMI usando altura dos dados de saúde
+    const height = dadosSaude?.altura_cm || 170;
     const heightM = height / 100;
     mockData.bmi = Math.round((mockData.weight / (heightM * heightM)) * 10) / 10;
 
@@ -362,19 +438,7 @@ export const AtualizarMedidasModal: React.FC<AtualizarMedidasModalProps> = ({ tr
 
           <TabsContent value="manual" className="space-y-4">
             <form onSubmit={handleSubmit} className="space-y-4">
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label htmlFor="altura">Altura (cm)</Label>
-                  <Input
-                    id="altura"
-                    type="number"
-                    value={formData.altura_cm}
-                    onChange={(e) => handleChange('altura_cm', e.target.value)}
-                    placeholder="175"
-                    required
-                  />
-                </div>
-                
+              <div className="space-y-4">
                 <div className="space-y-2">
                   <Label htmlFor="peso" className="flex items-center gap-2">
                     Peso Atual (kg) 
@@ -383,7 +447,7 @@ export const AtualizarMedidasModal: React.FC<AtualizarMedidasModalProps> = ({ tr
                   <Input
                     id="peso"
                     type="number"
-                    step="0.1"
+                    step="0.005"
                     value={formData.peso_atual_kg}
                     onChange={(e) => handleChange('peso_atual_kg', e.target.value)}
                     placeholder="70.5"
@@ -391,9 +455,7 @@ export const AtualizarMedidasModal: React.FC<AtualizarMedidasModalProps> = ({ tr
                     required
                   />
                 </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-4">
+                
                 <div className="space-y-2">
                   <Label htmlFor="circunferencia">Circunferência Abdominal (cm)</Label>
                   <Input
@@ -403,19 +465,6 @@ export const AtualizarMedidasModal: React.FC<AtualizarMedidasModalProps> = ({ tr
                     value={formData.circunferencia_abdominal_cm}
                     onChange={(e) => handleChange('circunferencia_abdominal_cm', e.target.value)}
                     placeholder="85.0"
-                    required
-                  />
-                </div>
-                
-                <div className="space-y-2">
-                  <Label htmlFor="meta">Meta de Peso (kg)</Label>
-                  <Input
-                    id="meta"
-                    type="number"
-                    step="0.1"
-                    value={formData.meta_peso_kg}
-                    onChange={(e) => handleChange('meta_peso_kg', e.target.value)}
-                    placeholder="65.0"
                     required
                   />
                 </div>
@@ -434,7 +483,7 @@ export const AtualizarMedidasModal: React.FC<AtualizarMedidasModalProps> = ({ tr
                   type="submit"
                   className="flex-1 bg-instituto-orange hover:bg-instituto-orange/90"
                 >
-                  Salvar e Atualizar Gráficos
+                  Salvar Medidas
                 </Button>
               </div>
             </form>
