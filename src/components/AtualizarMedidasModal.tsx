@@ -45,6 +45,8 @@ export const AtualizarMedidasModal: React.FC<AtualizarMedidasModalProps> = ({ tr
   const [activeTab, setActiveTab] = useState('manual');
   const [isWaitingStabilization, setIsWaitingStabilization] = useState(false);
   const [lastReadings, setLastReadings] = useState<number[]>([]);
+  const [isPairing, setIsPairing] = useState(false);
+  const [isWeighing, setIsWeighing] = useState(false);
 
   useEffect(() => {
     if (countdown > 0) {
@@ -142,7 +144,7 @@ export const AtualizarMedidasModal: React.FC<AtualizarMedidasModalProps> = ({ tr
       return;
     }
 
-    setIsScanning(true);
+    setIsPairing(true);
     
     try {
       const bluetoothDevice = await (navigator as any).bluetooth.requestDevice({
@@ -167,8 +169,46 @@ export const AtualizarMedidasModal: React.FC<AtualizarMedidasModalProps> = ({ tr
         });
       }
     } finally {
-      setIsScanning(false);
+      setIsPairing(false);
     }
+  };
+
+  const startWeighing = () => {
+    if (!isConnected || !device) {
+      toast({
+        title: "Erro",
+        description: "Balança não conectada",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setIsWeighing(true);
+    setCountdown(15);
+    setIsWaitingStabilization(false);
+    setLastReadings([]);
+    
+    toast({
+      title: "⚖️ Iniciando pesagem",
+      description: "Suba na balança e aguarde a estabilização",
+    });
+
+    // Timer de pesagem
+    let timeLeft = 15;
+    const timer = setInterval(() => {
+      timeLeft--;
+      setCountdown(timeLeft);
+      
+      if (timeLeft <= 0) {
+        clearInterval(timer);
+        setIsWeighing(false);
+        // NÃO cancelar automaticamente - apenas parar o timer
+        toast({
+          title: "⏰ Tempo de pesagem finalizado",
+          description: "Você pode tentar pesar novamente se necessário",
+        });
+      }
+    }, 1000);
   };
 
   const connectToDevice = async (bluetoothDevice: any) => {
@@ -231,35 +271,15 @@ export const AtualizarMedidasModal: React.FC<AtualizarMedidasModalProps> = ({ tr
       }
 
       setIsConnected(true);
-      setCountdown(10);
-      setIsWaitingStabilization(false);
-      setLastReadings([]);
+      setDevice(bluetoothDevice);
       
       toast({
-        title: "✅ Balança Conectada!",
-        description: "Suba na balança e aguarde a estabilização do peso",
+        title: "✅ Balança Pareada!",
+        description: "Agora você pode iniciar a pesagem",
       });
 
-      // Timer de 10 segundos para aguardar estabilização
-      let timeLeft = 10;
-      const timer = setInterval(() => {
-        timeLeft--;
-        setCountdown(timeLeft);
-        
-        if (timeLeft <= 0) {
-          clearInterval(timer);
-          if (!scaleData) {
-            toast({
-              title: "⏰ Tempo esgotado",
-              description: "Não foi possível capturar dados estabilizados. Tente novamente.",
-              variant: "destructive",
-            });
-            cancelMeasurement();
-          }
-        }
-      }, 1000);
-
     } catch (error) {
+      console.error('❌ Erro na conexão:', error);
       toast({
         title: "Erro na conexão",
         description: "Não foi possível conectar com a balança",
@@ -269,83 +289,57 @@ export const AtualizarMedidasModal: React.FC<AtualizarMedidasModalProps> = ({ tr
   };
 
   const handleWeightMeasurement = (event: Event) => {
+    // Só processar se estiver pesando
+    if (!isWeighing) {
+      console.log('📊 Dados recebidos mas não está pesando - ignorando');
+      return;
+    }
+
     const target = event.target as any;
     const value = target.value as DataView;
     
     if (!value) return;
 
     try {
-      console.log('🎯 Mi Scale 2 - Dados recebidos:', value.byteLength, 'bytes');
+      console.log('🎯 Mi Scale 2 - Dados de pesagem:', value.byteLength, 'bytes');
       const hexData = Array.from(new Uint8Array(value.buffer)).map(b => b.toString(16).padStart(2, '0')).join(' ');
       console.log('Hex:', hexData);
       
-      // PROTOCOLO OFICIAL Xiaomi Mi Body Composition Scale 2
-      // Aguardar estabilização REAL dos dados
-      
+      // PROTOCOLO Mi Scale 2 - SIMPLIFICADO para evitar cancelamentos
       if (value.byteLength < 3) {
         console.log('❌ Dados insuficientes');
         return;
       }
 
-      // Mi Scale 2 - Leitura dos flags de status
-      const flags = value.getUint8(0);
-      const weightUnit = (flags & 0x01) === 0 ? 'kg' : 'lb';
-      const timestampPresent = (flags & 0x02) !== 0;
-      const userIdPresent = (flags & 0x04) !== 0;
-      const bmiPresent = (flags & 0x08) !== 0;
-      const stabilized = (flags & 0x20) !== 0; // Flag de estabilização
-      
-      console.log('🔍 Flags de status:', {
-        stabilized,
-        weightUnit,
-        timestampPresent,
-        userIdPresent,
-        bmiPresent
-      });
-
-      // ✅ AGUARDAR ESTABILIZAÇÃO REAL
-      if (!stabilized) {
-        console.log('⏳ Peso ainda não estabilizou, aguardando...');
-        setIsWaitingStabilization(true);
-        return;
-      }
-
-      // Mi Scale 2 - Peso estabilizado nos bytes 1-2 (offset 1), little endian
+      // Peso nos bytes 1-2, little endian, dividido por 200
       const weightRaw = value.getUint16(1, true);
-      let weight = weightRaw / (weightUnit === 'kg' ? 200 : 100);
+      let weight = weightRaw / 200;
       
-      // Converter libras para kg se necessário
-      if (weightUnit === 'lb') {
-        weight = weight * 0.453592;
-      }
+      console.log(`📊 Mi Scale 2 - Raw: ${weightRaw}, Peso: ${weight}kg`);
       
-      console.log(`📊 Mi Scale 2 ESTABILIZADO - Raw: ${weightRaw}, Peso: ${weight}kg`);
-      
-      // Validação de peso realista
+      // Validação básica de peso realista
       if (weight < 10 || weight > 300) {
-        console.log('❌ Peso fora do range humano válido:', weight);
+        console.log('❌ Peso fora do range válido:', weight);
         return;
       }
 
-      // ✅ ALGORITMO DE ESTABILIZAÇÃO ADICIONAL
-      // Aguardar 3 leituras consecutivas com variação < 0.1kg
+      // SIMPLIFICADO: Aceitar o peso após 2 leituras similares
       const newReadings = [...lastReadings, weight];
-      if (newReadings.length > 3) {
-        newReadings.shift(); // Manter apenas as 3 últimas
+      if (newReadings.length > 2) {
+        newReadings.shift();
       }
       setLastReadings(newReadings);
 
-      if (newReadings.length === 3) {
-        const maxVariation = Math.max(...newReadings) - Math.min(...newReadings);
-        if (maxVariation > 0.1) {
-          console.log('⏳ Peso ainda variando, aguardando estabilização completa...', newReadings);
+      if (newReadings.length >= 2) {
+        const variation = Math.abs(newReadings[1] - newReadings[0]);
+        if (variation < 0.3) { // Mais tolerante
+          weight = (newReadings[0] + newReadings[1]) / 2; // Média das 2 leituras
+        } else {
+          console.log('⏳ Aguardando estabilização...', newReadings);
           return;
         }
-        // Usar a média das 3 leituras para maior precisão
-        weight = newReadings.reduce((a, b) => a + b, 0) / newReadings.length;
       } else {
-        console.log('⏳ Coletando leituras para estabilização...', newReadings);
-        return;
+        return; // Aguardar mais leituras
       }
 
       setIsWaitingStabilization(false);
@@ -385,14 +379,15 @@ export const AtualizarMedidasModal: React.FC<AtualizarMedidasModalProps> = ({ tr
       setScaleData(realData);
       setCountdown(0);
       setLastReadings([]);
+      setIsWeighing(false);
       
       toast({
-        title: "✅ Mi Scale 2 - Peso Estabilizado!",
-        description: `Peso final: ${realData.weight}kg | IMC: ${realData.bmi} | Impedância: ${impedance}Ω`,
+        title: "✅ Pesagem Concluída!",
+        description: `Peso: ${realData.weight}kg | IMC: ${realData.bmi}`,
         duration: 8000,
       });
       
-      console.log('✅ Dados estabilizados processados:', realData);
+      console.log('✅ Pesagem finalizada:', realData);
       
     } catch (error) {
       console.error('❌ Erro ao processar dados da Mi Scale:', error);
@@ -405,6 +400,18 @@ export const AtualizarMedidasModal: React.FC<AtualizarMedidasModalProps> = ({ tr
   };
 
   const cancelMeasurement = () => {
+    setIsWeighing(false);
+    setCountdown(0);
+    setIsWaitingStabilization(false);
+    setLastReadings([]);
+    
+    toast({
+      title: "❌ Pesagem cancelada",
+      description: "Pesagem interrompida pelo usuário",
+    });
+  };
+
+  const disconnectScale = () => {
     if (device && device.gatt?.connected) {
       device.gatt.disconnect();
     }
@@ -414,10 +421,11 @@ export const AtualizarMedidasModal: React.FC<AtualizarMedidasModalProps> = ({ tr
     setCountdown(0);
     setIsWaitingStabilization(false);
     setLastReadings([]);
+    setIsWeighing(false);
     
     toast({
-      title: "❌ Medição cancelada",
-      description: "Conexão com a balança foi encerrada",
+      title: "🔌 Balança desconectada",
+      description: "Conexão encerrada",
     });
   };
 
@@ -470,79 +478,96 @@ export const AtualizarMedidasModal: React.FC<AtualizarMedidasModalProps> = ({ tr
                       </p>
                       <p className="text-sm text-muted-foreground">
                         {isConnected 
-                          ? countdown > 0 
-                            ? isWaitingStabilization
-                              ? `Aguardando estabilização... ${countdown}s`
-                              : `Suba na balança: ${countdown}s`
-                            : 'Medição finalizada'
-                          : 'Clique em "Pesagem Rápida" para iniciar'
+                          ? isWeighing
+                            ? countdown > 0 
+                              ? `Pesando... ${countdown}s restantes`
+                              : 'Finalizando pesagem...'
+                            : 'Pronto para pesar'
+                          : 'Clique em "Parear Balança" para conectar'
                         }
                       </p>
                     </div>
                   </div>
                   <div className={`w-3 h-3 rounded-full ${
                     isConnected 
-                      ? isWaitingStabilization 
-                        ? 'bg-yellow-500 animate-pulse' 
-                        : 'bg-green-500 animate-pulse' 
+                      ? isWeighing 
+                        ? 'bg-blue-500 animate-pulse' 
+                        : 'bg-green-500' 
                       : 'bg-muted-foreground'
                   }`} />
                 </div>
 
-                {/* Botão de Pesagem Rápida */}
+                {/* Botões de Ação */}
                 {!isConnected ? (
                   <Button 
                     onClick={startPairing}
-                    disabled={isScanning || !user}
+                    disabled={isPairing || !user}
                     className="w-full bg-instituto-purple hover:bg-instituto-purple/80"
                     size="lg"
                   >
-                    {isScanning ? (
+                    {isPairing ? (
                       <>
                         <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2" />
-                        Procurando balança...
+                        Pareando balança...
                       </>
                     ) : (
                       <>
-                        <Scale className="h-4 w-4 mr-2" />
-                        🚀 Pesagem Rápida - Mi Scale 2
+                        <Bluetooth className="h-4 w-4 mr-2" />
+                        🔗 Parear Mi Scale 2
                       </>
                     )}
                   </Button>
                 ) : (
                   <div className="space-y-3">
-                    <div className="text-center">
-                      {countdown > 0 ? (
+                    {!isWeighing ? (
+                      <Button 
+                        onClick={startWeighing}
+                        className="w-full bg-green-600 hover:bg-green-700 text-white"
+                        size="lg"
+                      >
+                        <Scale className="h-4 w-4 mr-2" />
+                        ⚖️ Iniciar Pesagem
+                      </Button>
+                    ) : (
+                      <div className="text-center">
                         <div className="space-y-2">
-                          <div className="flex items-center justify-center gap-2 text-lg font-bold text-instituto-purple">
+                          <div className="flex items-center justify-center gap-2 text-lg font-bold text-blue-600">
                             <Timer className="h-5 w-5" />
                             {countdown}s
                           </div>
                           <p className="text-sm text-muted-foreground">
-                            {isWaitingStabilization 
-                              ? "⏳ Aguardando peso estabilizar..."
-                              : countdown > 5 
-                                ? "🔵 Suba na balança agora"
-                                : "⚖️ Mantenha-se na balança até estabilizar"
+                            {countdown > 5 
+                              ? "🔵 Suba na balança agora"
+                              : "⚖️ Aguardando estabilização..."
                             }
                           </p>
                         </div>
-                      ) : (
-                        <p className="text-instituto-purple font-medium">
-                          Finalizando medição...
-                        </p>
-                      )}
-                    </div>
+                      </div>
+                    )}
                     
-                    <Button 
-                      onClick={cancelMeasurement}
-                      variant="outline"
-                      size="sm"
-                      className="w-full border-red-200 text-red-600 hover:bg-red-50"
-                    >
-                      <X className="h-4 w-4 mr-2" />
-                      Cancelar Medição
-                    </Button>
+                    <div className="flex gap-2">
+                      {isWeighing && (
+                        <Button 
+                          onClick={cancelMeasurement}
+                          variant="outline"
+                          size="sm"
+                          className="flex-1 border-red-200 text-red-600 hover:bg-red-50"
+                        >
+                          <X className="h-4 w-4 mr-2" />
+                          Cancelar Pesagem
+                        </Button>
+                      )}
+                      
+                      <Button 
+                        onClick={disconnectScale}
+                        variant="outline"
+                        size="sm"
+                        className={`${isWeighing ? 'flex-1' : 'w-full'} border-gray-200 text-gray-600 hover:bg-gray-50`}
+                      >
+                        <Bluetooth className="h-4 w-4 mr-2" />
+                        Desconectar
+                      </Button>
+                    </div>
                   </div>
                 )}
 
