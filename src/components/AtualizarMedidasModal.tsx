@@ -5,8 +5,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Scale, Ruler, Bluetooth, CheckCircle, Timer, X, User } from 'lucide-react';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Scale, Ruler, Bluetooth, CheckCircle, Timer, X } from 'lucide-react';
 import { useDadosSaude, DadosSaude } from '@/hooks/useDadosSaude';
 import { useToast } from '@/hooks/use-toast';
 import { supabase } from '@/integrations/supabase/client';
@@ -46,8 +45,6 @@ export const AtualizarMedidasModal: React.FC<AtualizarMedidasModalProps> = ({ tr
   const [activeTab, setActiveTab] = useState('manual');
   const [isWaitingStabilization, setIsWaitingStabilization] = useState(false);
   const [lastReadings, setLastReadings] = useState<number[]>([]);
-  const [selectedUserId, setSelectedUserId] = useState<string>('');
-  const [availableUsers, setAvailableUsers] = useState<any[]>([]);
 
   useEffect(() => {
     if (countdown > 0) {
@@ -55,22 +52,6 @@ export const AtualizarMedidasModal: React.FC<AtualizarMedidasModalProps> = ({ tr
       return () => clearTimeout(timer);
     }
   }, [countdown]);
-
-  // Carregar usuários disponíveis
-  useEffect(() => {
-    const loadUsers = async () => {
-      if (user) {
-        const { data } = await supabase
-          .from('profiles')
-          .select('id, full_name, email')
-          .order('full_name');
-        
-        setAvailableUsers(data || []);
-        setSelectedUserId(user.id); // Selecionar usuário atual por padrão
-      }
-    };
-    loadUsers();
-  }, [user]);
 
   // Atualizar formulário quando dados da balança chegarem
   useEffect(() => {
@@ -94,13 +75,13 @@ export const AtualizarMedidasModal: React.FC<AtualizarMedidasModalProps> = ({ tr
       meta_peso_kg: dadosSaude?.meta_peso_kg || parseFloat(formData.peso_atual_kg.toString())
     };
 
-    // Se há dados da balança, salvar na tabela de pesagens para o usuário selecionado
-    if (scaleData && selectedUserId) {
+    // Se há dados da balança, salvar na tabela de pesagens para o usuário atual
+    if (scaleData && user) {
       try {
         await supabase
           .from('pesagens')
           .insert({
-            user_id: selectedUserId,
+            user_id: user.id,
             peso_kg: scaleData.weight,
             gordura_corporal_pct: scaleData.bodyFat,
             massa_muscular_kg: scaleData.muscleMass,
@@ -111,10 +92,9 @@ export const AtualizarMedidasModal: React.FC<AtualizarMedidasModalProps> = ({ tr
             origem_medicao: 'balança_bluetooth_usuario'
           });
 
-        const selectedUser = availableUsers.find(u => u.id === selectedUserId);
         toast({
           title: "✅ Dados salvos!",
-          description: `Pesagem registrada para ${selectedUser?.full_name || 'usuário'}`,
+          description: `Pesagem registrada com sucesso`,
         });
       } catch (error) {
         console.error('Erro ao salvar dados da balança:', error);
@@ -193,15 +173,20 @@ export const AtualizarMedidasModal: React.FC<AtualizarMedidasModalProps> = ({ tr
 
   const connectToDevice = async (bluetoothDevice: any) => {
     try {
+      console.log('🔗 Conectando ao dispositivo:', bluetoothDevice.name);
       const server = await bluetoothDevice.gatt?.connect();
       
       if (!server) {
         throw new Error('Não foi possível conectar');
       }
 
+      console.log('✅ GATT Server conectado');
+
       bluetoothDevice.addEventListener('gattserverdisconnected', () => {
+        console.log('⚠️ Balança desconectada');
         setIsConnected(false);
         setDevice(null);
+        setCountdown(0);
         toast({
           title: "Balança desconectada",
           description: "A conexão foi perdida",
@@ -209,27 +194,40 @@ export const AtualizarMedidasModal: React.FC<AtualizarMedidasModalProps> = ({ tr
         });
       });
 
-      // Configurar listener para medição real
+      // Configurar listener para medição real com tratamento robusto
       try {
+        console.log('🔍 Descobrindo serviços...');
         const services = await server.getPrimaryServices();
-        console.log('Serviços encontrados:', services.length);
+        console.log(`📡 Serviços encontrados: ${services.length}`);
+        
+        let notificationSetup = false;
         
         for (const service of services) {
           try {
+            console.log(`🔧 Analisando serviço: ${service.uuid}`);
             const characteristics = await service.getCharacteristics();
+            
             for (const characteristic of characteristics) {
+              console.log(`📋 Característica: ${characteristic.uuid}, Notify: ${characteristic.properties.notify}`);
+              
               if (characteristic.properties.notify) {
                 await characteristic.startNotifications();
                 characteristic.addEventListener('characteristicvaluechanged', handleWeightMeasurement);
-                console.log('Notificações configuradas para:', characteristic.uuid);
+                console.log(`✅ Notificações ativas: ${characteristic.uuid}`);
+                notificationSetup = true;
               }
             }
-          } catch (err) {
-            console.log('Erro ao configurar característica:', err);
+          } catch (serviceError) {
+            console.warn('⚠️ Erro em serviço específico:', serviceError);
           }
         }
-      } catch (err) {
-        console.log('Erro ao descobrir serviços:', err);
+        
+        if (!notificationSetup) {
+          console.warn('⚠️ Nenhuma notificação configurada');
+        }
+        
+      } catch (discoveryError) {
+        console.error('❌ Erro na descoberta de serviços:', discoveryError);
       }
 
       setIsConnected(true);
@@ -445,7 +443,7 @@ export const AtualizarMedidasModal: React.FC<AtualizarMedidasModalProps> = ({ tr
         
         <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
           <TabsList className="grid w-full grid-cols-2">
-            <TabsTrigger value="scale">🔗 Balança Mi Scale 2</TabsTrigger>
+            <TabsTrigger value="scale">⚖️ Pesagem Rápida</TabsTrigger>
             <TabsTrigger value="manual">✏️ Manual</TabsTrigger>
           </TabsList>
           
@@ -453,31 +451,11 @@ export const AtualizarMedidasModal: React.FC<AtualizarMedidasModalProps> = ({ tr
             <Card>
               <CardHeader>
                 <CardTitle className="flex items-center gap-2 text-instituto-purple">
-                  <Bluetooth className="h-5 w-5" />
-                  Conectar Mi Body Composition Scale 2
+                  <Scale className="h-5 w-5" />
+                  Mi Scale 2 - Pesagem Automática
                 </CardTitle>
               </CardHeader>
               <CardContent className="space-y-4">
-                {/* Seleção de Usuário */}
-                <div className="space-y-2">
-                  <Label className="flex items-center gap-2">
-                    <User className="h-4 w-4" />
-                    Usuário para registrar a pesagem
-                  </Label>
-                  <Select value={selectedUserId} onValueChange={setSelectedUserId}>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Selecione o usuário" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {availableUsers.map((userOption) => (
-                        <SelectItem key={userOption.id} value={userOption.id}>
-                          {userOption.full_name || userOption.email}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-
                 {/* Status da Conexão */}
                 <div className="flex items-center justify-between p-4 bg-muted rounded-lg">
                   <div className="flex items-center gap-3">
@@ -488,7 +466,7 @@ export const AtualizarMedidasModal: React.FC<AtualizarMedidasModalProps> = ({ tr
                     )}
                     <div>
                       <p className="font-medium">
-                        {isConnected ? `Conectado: ${device?.name || 'Balança'}` : 'Desconectado'}
+                        {isConnected ? `Conectado: ${device?.name || 'Mi Scale 2'}` : 'Pronto para conectar'}
                       </p>
                       <p className="text-sm text-muted-foreground">
                         {isConnected 
@@ -497,7 +475,7 @@ export const AtualizarMedidasModal: React.FC<AtualizarMedidasModalProps> = ({ tr
                               ? `Aguardando estabilização... ${countdown}s`
                               : `Suba na balança: ${countdown}s`
                             : 'Medição finalizada'
-                          : 'Selecione um usuário e conecte'
+                          : 'Clique em "Pesagem Rápida" para iniciar'
                         }
                       </p>
                     </div>
@@ -511,11 +489,11 @@ export const AtualizarMedidasModal: React.FC<AtualizarMedidasModalProps> = ({ tr
                   }`} />
                 </div>
 
-                {/* Botões de Ação */}
+                {/* Botão de Pesagem Rápida */}
                 {!isConnected ? (
                   <Button 
                     onClick={startPairing}
-                    disabled={isScanning || !selectedUserId}
+                    disabled={isScanning || !user}
                     className="w-full bg-instituto-purple hover:bg-instituto-purple/80"
                     size="lg"
                   >
@@ -527,7 +505,7 @@ export const AtualizarMedidasModal: React.FC<AtualizarMedidasModalProps> = ({ tr
                     ) : (
                       <>
                         <Scale className="h-4 w-4 mr-2" />
-                        Conectar Mi Scale 2
+                        🚀 Pesagem Rápida - Mi Scale 2
                       </>
                     )}
                   </Button>
