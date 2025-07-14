@@ -161,68 +161,54 @@ export const AdminDashboard: React.FC = () => {
         </div>
 
         {/* Main Content */}
-        <Tabs defaultValue="sessions" className="space-y-6">
-          <TabsList className="bg-netflix-card border border-netflix-border">
+        <Tabs defaultValue="usuarios" className="space-y-6">
+          <TabsList className="bg-netflix-card border border-netflix-border grid grid-cols-2 lg:grid-cols-4 gap-1">
+            {/* 👥 Gestão de Usuários */}
             <TabsTrigger 
-              value="users" 
-              className="data-[state=active]:bg-instituto-orange data-[state=active]:text-white text-netflix-text"
+              value="usuarios" 
+              className="data-[state=active]:bg-instituto-orange data-[state=active]:text-white text-netflix-text transition-all duration-200 hover:bg-instituto-orange/20"
             >
-              <Shield className="h-4 w-4 mr-2" />
-              Gerenciar Usuários
+              <Users className="h-4 w-4 mr-2" />
+              👥 Usuários
             </TabsTrigger>
+            
+            {/* 📊 Relatórios e Dados */}
             <TabsTrigger 
-              value="data" 
-              className="data-[state=active]:bg-instituto-orange data-[state=active]:text-white text-netflix-text"
-            >
-              <Eye className="h-4 w-4 mr-2" />
-              Visualizar Dados
-            </TabsTrigger>
-            <TabsTrigger 
-              value="sessions" 
-              className="data-[state=active]:bg-instituto-orange data-[state=active]:text-white text-netflix-text"
-            >
-              <Video className="h-4 w-4 mr-2" />
-              Sessões
-            </TabsTrigger>
-            <TabsTrigger 
-              value="weighing" 
-              className="data-[state=active]:bg-instituto-orange data-[state=active]:text-white text-netflix-text"
-            >
-              <Scale className="h-4 w-4 mr-2" />
-              Pesagens
-            </TabsTrigger>
-            <TabsTrigger 
-              value="bluetooth" 
-              className="data-[state=active]:bg-instituto-orange data-[state=active]:text-white text-netflix-text"
-            >
-              <Activity className="h-4 w-4 mr-2" />
-              Bluetooth
-            </TabsTrigger>
-            <TabsTrigger 
-              value="analytics" 
-              className="data-[state=active]:bg-instituto-orange data-[state=active]:text-white text-netflix-text"
+              value="relatorios" 
+              className="data-[state=active]:bg-instituto-purple data-[state=active]:text-white text-netflix-text transition-all duration-200 hover:bg-instituto-purple/20"
             >
               <BarChart3 className="h-4 w-4 mr-2" />
-              Relatórios
+              📊 Relatórios
+            </TabsTrigger>
+            
+            {/* ⚙️ Configurações */}
+            <TabsTrigger 
+              value="configuracoes" 
+              className="data-[state=active]:bg-instituto-green data-[state=active]:text-white text-netflix-text transition-all duration-200 hover:bg-instituto-green/20"
+            >
+              <Settings className="h-4 w-4 mr-2" />
+              ⚙️ Config
+            </TabsTrigger>
+            
+            {/* 📲 Bluetooth */}
+            <TabsTrigger 
+              value="bluetooth" 
+              className="data-[state=active]:bg-instituto-lilac data-[state=active]:text-white text-netflix-text transition-all duration-200 hover:bg-instituto-lilac/20"
+            >
+              <Scale className="h-4 w-4 mr-2" />
+              📲 Balança
             </TabsTrigger>
           </TabsList>
 
-          <TabsContent value="users" className="space-y-6">
-            <UserManagement />
-          </TabsContent>
-
-          <TabsContent value="data" className="space-y-6">
-            <DataVisualization />
-          </TabsContent>
-
-          <TabsContent value="sessions" className="space-y-6">
+          {/* 👥 GESTÃO DE USUÁRIOS */}
+          <TabsContent value="usuarios" className="space-y-6">
             <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
-              {/* BLOCO 1: Cadastro e Visualização do Cliente */}
-              <Card className="bg-netflix-card border-netflix-border">
+              {/* Cadastro de Cliente */}
+              <Card className="bg-netflix-card border-netflix-border hover:border-instituto-orange/50 transition-all duration-300">
                 <CardHeader>
                   <CardTitle className="text-netflix-text flex items-center gap-2">
-                    <Users className="h-5 w-5 text-instituto-orange" />
-                    Cadastro de Cliente
+                    <UserPlus className="h-5 w-5 text-instituto-orange" />
+                    👤 Cadastrar Cliente
                   </CardTitle>
                 </CardHeader>
                 <CardContent>
@@ -230,153 +216,177 @@ export const AdminDashboard: React.FC = () => {
                 </CardContent>
               </Card>
 
-              {/* BLOCO 2: Gestão de Sessões */}
-              <Card className="bg-netflix-card border-netflix-border">
+              {/* Lista de Usuários */}
+              <Card className="bg-netflix-card border-netflix-border hover:border-instituto-orange/50 transition-all duration-300">
                 <CardHeader>
                   <CardTitle className="text-netflix-text flex items-center gap-2">
-                    <Video className="h-5 w-5 text-instituto-purple" />
-                    Gestão de Sessões
+                    <Users className="h-5 w-5 text-instituto-orange" />
+                    👥 Lista de Usuários
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <UsersList />
+                </CardContent>
+              </Card>
+            </div>
+
+            {/* Gerenciamento Completo */}
+            <Card className="bg-netflix-card border-netflix-border hover:border-instituto-orange/50 transition-all duration-300">
+              <CardHeader>
+                <CardTitle className="text-netflix-text flex items-center gap-2">
+                  <Shield className="h-5 w-5 text-instituto-orange" />
+                  🔧 Gerenciamento Avançado
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <UserManagement />
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          {/* 📊 RELATÓRIOS E DADOS */}
+          <TabsContent value="relatorios" className="space-y-6">
+            <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
+              {/* Visualização de Dados */}
+              <Card className="bg-netflix-card border-netflix-border hover:border-instituto-purple/50 transition-all duration-300">
+                <CardHeader>
+                  <CardTitle className="text-netflix-text flex items-center gap-2">
+                    <Eye className="h-5 w-5 text-instituto-purple" />
+                    📈 Visualizar Dados
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <DataVisualization />
+                </CardContent>
+              </Card>
+
+              {/* Relatórios de Clientes */}
+              <Card className="bg-netflix-card border-netflix-border hover:border-instituto-purple/50 transition-all duration-300">
+                <CardHeader>
+                  <CardTitle className="text-netflix-text flex items-center gap-2">
+                    <BarChart3 className="h-5 w-5 text-instituto-purple" />
+                    📊 Relatórios de Clientes
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <ClientReports />
+                </CardContent>
+              </Card>
+            </div>
+
+            {/* Sistema de Peso Completo */}
+            <Card className="bg-netflix-card border-netflix-border hover:border-instituto-purple/50 transition-all duration-300">
+              <CardHeader>
+                <CardTitle className="text-netflix-text flex items-center gap-2">
+                  <TrendingUp className="h-5 w-5 text-instituto-purple" />
+                  📈 Sistema de Controle de Peso
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <CompleteTrendTrackWeightSystem />
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          {/* ⚙️ CONFIGURAÇÕES E INTEGRAÇÕES */}
+          <TabsContent value="configuracoes" className="space-y-6">
+            <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
+              {/* Gestão de Sessões */}
+              <Card className="bg-netflix-card border-netflix-border hover:border-instituto-green/50 transition-all duration-300">
+                <CardHeader>
+                  <CardTitle className="text-netflix-text flex items-center gap-2">
+                    <Video className="h-5 w-5 text-instituto-green" />
+                    🎥 Gestão de Sessões
                   </CardTitle>
                 </CardHeader>
                 <CardContent>
                   <SessionManagement />
                 </CardContent>
               </Card>
+
+              {/* Histórico de Sessões */}
+              <Card className="bg-netflix-card border-netflix-border hover:border-instituto-green/50 transition-all duration-300">
+                <CardHeader>
+                  <CardTitle className="text-netflix-text flex items-center gap-2">
+                    <Calendar className="h-5 w-5 text-instituto-green" />
+                    📅 Histórico de Sessões
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <SessionHistory />
+                </CardContent>
+              </Card>
             </div>
-
-            {/* BLOCO 3: Histórico de Sessões */}
-            <Card className="bg-netflix-card border-netflix-border">
-              <CardHeader>
-                <CardTitle className="text-netflix-text flex items-center gap-2">
-                  <Calendar className="h-5 w-5 text-instituto-green" />
-                  Histórico de Sessões
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                <SessionHistory />
-              </CardContent>
-            </Card>
-
-            {/* BLOCO 4: Relatórios e Gráficos */}
-            <Card className="bg-netflix-card border-netflix-border">
-              <CardHeader>
-                <CardTitle className="text-netflix-text flex items-center gap-2">
-                  <BarChart3 className="h-5 w-5 text-instituto-lilac" />
-                  Relatórios e Gráficos
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                <ClientReports />
-              </CardContent>
-            </Card>
           </TabsContent>
 
-          <TabsContent value="weighing" className="space-y-6">
-            <CompleteTrendTrackWeightSystem />
-          </TabsContent>
-
+          {/* 📲 PAREAMENTO COM BALANÇA BLUETOOTH */}
           <TabsContent value="bluetooth" className="space-y-6">
-            {/* Botão de Destaque para Parear Balança */}
-            <Card className="bg-gradient-to-r from-instituto-orange/10 to-instituto-purple/10 border-instituto-orange/50">
+            {/* Botão Principal de Pareamento */}
+            <Card className="bg-gradient-to-r from-instituto-lilac/10 to-instituto-orange/10 border-instituto-lilac/50 hover:border-instituto-lilac transition-all duration-300">
               <CardHeader>
                 <CardTitle className="text-netflix-text flex items-center gap-2">
-                  <Scale className="h-6 w-6 text-instituto-orange" />
-                  Pareamento da Mi Body Composition Scale 2
+                  <Scale className="h-6 w-6 text-instituto-lilac animate-pulse" />
+                  📲 Pareamento da Mi Body Composition Scale 2
                 </CardTitle>
               </CardHeader>
               <CardContent>
                 <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
-                  <div>
+                  <div className="flex-1">
                     <h3 className="text-lg font-semibold text-netflix-text mb-2">
-                      Conectar Balança Inteligente
+                      🔗 Conectar Balança Inteligente
                     </h3>
-                    <p className="text-netflix-text-muted">
+                    <p className="text-netflix-text-muted mb-4">
                       Use o protocolo Web Bluetooth para conectar diretamente com sua balança Xiaomi Mi e capturar dados em tempo real.
                     </p>
+                    <div className="flex items-center gap-2 text-sm text-instituto-lilac">
+                      <div className="w-2 h-2 bg-instituto-lilac rounded-full animate-ping"></div>
+                      <span>Pronto para pareamento</span>
+                    </div>
                   </div>
-                  <MiScalePairingButton 
-                    onDeviceFound={(device) => {
-                      console.log('Dispositivo encontrado:', device);
-                    }}
-                    onConnected={(device) => {
-                      console.log('Dispositivo conectado:', device);
-                    }}
-                  />
+                  <div className="flex flex-col items-center gap-2">
+                    <MiScalePairingButton 
+                      onDeviceFound={(device) => {
+                        console.log('Dispositivo encontrado:', device);
+                      }}
+                      onConnected={(device) => {
+                        console.log('Dispositivo conectado:', device);
+                      }}
+                    />
+                    <span className="text-xs text-netflix-text-muted">Clique para iniciar</span>
+                  </div>
                 </div>
               </CardContent>
             </Card>
 
             <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
-              {/* BLOCO 1: Integração Bluetooth */}
-              <div className="space-y-6">
-                <BluetoothScaleIntegration />
-              </div>
-
-              {/* BLOCO 2: Gerenciamento de Usuários */}
-              <div className="space-y-6">
-                <BluetoothUserManagement />
-              </div>
-            </div>
-          </TabsContent>
-
-          <TabsContent value="analytics" className="space-y-6">
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-              {/* Recent Activity */}
-              <Card className="bg-netflix-card border-netflix-border">
+              {/* Integração Bluetooth */}
+              <Card className="bg-netflix-card border-netflix-border hover:border-instituto-lilac/50 transition-all duration-300">
                 <CardHeader>
                   <CardTitle className="text-netflix-text flex items-center gap-2">
-                    <Calendar className="h-5 w-5" />
-                    Atividade Recente
-                  </CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                  {recentActivity.map((activity, index) => (
-                    <div 
-                      key={index} 
-                      className="flex items-center gap-4 p-3 bg-netflix-hover rounded-lg animate-slide-in-left"
-                      style={{ animationDelay: `${index * 0.1}s` }}
-                    >
-                      <div className="p-2 bg-instituto-orange/10 rounded-lg">
-                        <activity.icon className="h-4 w-4 text-instituto-orange" />
-                      </div>
-                      <div className="flex-1">
-                        <p className="text-sm font-medium text-netflix-text">
-                          {activity.client}
-                        </p>
-                        <p className="text-xs text-netflix-text-muted">
-                          {activity.session}
-                        </p>
-                      </div>
-                      <span className="text-xs text-netflix-text-muted">
-                        {activity.time}
-                      </span>
-                    </div>
-                  ))}
-                </CardContent>
-              </Card>
-
-              {/* Analytics Preview */}
-              <Card className="bg-netflix-card border-netflix-border">
-                <CardHeader>
-                  <CardTitle className="text-netflix-text flex items-center gap-2">
-                    <BarChart3 className="h-5 w-5" />
-                    Relatórios Detalhados
+                    <Activity className="h-5 w-5 text-instituto-lilac" />
+                    📥 Importar Dados da Balança
                   </CardTitle>
                 </CardHeader>
                 <CardContent>
-                  <div className="text-center py-12">
-                    <BarChart3 className="h-16 w-16 text-netflix-text-muted mx-auto mb-4" />
-                    <h3 className="text-xl font-bold text-netflix-text mb-2">
-                      Analytics Avançados
-                    </h3>
-                    <p className="text-netflix-text-muted mb-6">
-                      Em breve: gráficos detalhados, métricas de engajamento e relatórios personalizados
-                    </p>
-                  </div>
+                  <BluetoothScaleIntegration />
+                </CardContent>
+              </Card>
+
+              {/* Gerenciamento de Usuários Bluetooth */}
+              <Card className="bg-netflix-card border-netflix-border hover:border-instituto-lilac/50 transition-all duration-300">
+                <CardHeader>
+                  <CardTitle className="text-netflix-text flex items-center gap-2">
+                    <Users className="h-5 w-5 text-instituto-lilac" />
+                    👤 Selecionar Usuário
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <BluetoothUserManagement />
                 </CardContent>
               </Card>
             </div>
           </TabsContent>
+
         </Tabs>
       </div>
     </AdminProtectedRoute>
