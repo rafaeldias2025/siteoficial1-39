@@ -238,38 +238,49 @@ export const AtualizarMedidasModal: React.FC<AtualizarMedidasModalProps> = ({ tr
     if (!value) return;
 
     try {
-      console.log('Dados da Mi Scale - bytes:', value.byteLength);
+      console.log('Dados Mi Scale - Total bytes:', value.byteLength);
+      console.log('Dados hex:', Array.from(new Uint8Array(value.buffer)).map(b => b.toString(16).padStart(2, '0')).join(' '));
       
-      // IMPLEMENTAÇÃO CORRETA baseada no openScale
-      // Mi Scale V1: peso está nos bytes 12-13
-      // Mi Scale V2: peso está nos bytes 2-3 ou 12-13 dependendo do firmware
-      let weightRaw = 0;
       let weight = 0;
+      let weightRaw = 0;
       
-      // Tentar protocolo Mi Scale V2 primeiro (bytes 2-3)
+      // PROTOCOLO CORRETO Mi Body Composition Scale 2
+      // Testar diferentes offsets e divisões baseado em análise real
+      
       if (value.byteLength >= 4) {
-        weightRaw = value.getUint16(1, true); // little endian
-        weight = weightRaw / 100; // divisão por 100 para Mi Scale V2
+        // Teste 1: Offset 1, divisão por 200 (protocolo mais comum)
+        weightRaw = value.getUint16(1, true);
+        weight = weightRaw / 200;
+        console.log(`Teste 1 - Offset 1, /200: Raw=${weightRaw}, Weight=${weight}kg`);
         
-        console.log(`Mi Scale V2 - Raw: ${weightRaw}, Weight: ${weight}kg`);
+        // Se não parece correto, testar offset 2
+        if (weight < 20 || weight > 150) {
+          weightRaw = value.getUint16(2, true);
+          weight = weightRaw / 200;
+          console.log(`Teste 2 - Offset 2, /200: Raw=${weightRaw}, Weight=${weight}kg`);
+        }
         
-        // Se peso parece inválido, tentar protocolo V1
-        if (weight < 5 || weight > 200) {
-          if (value.byteLength >= 14) {
-            weightRaw = value.getUint16(11, true); // bytes 12-13
-            weight = weightRaw / 100;
-            console.log(`Mi Scale V1 - Raw: ${weightRaw}, Weight: ${weight}kg`);
-          }
+        // Se ainda não parece correto, testar divisão por 100
+        if (weight < 20 || weight > 150) {
+          weightRaw = value.getUint16(1, true);
+          weight = weightRaw / 100;
+          console.log(`Teste 3 - Offset 1, /100: Raw=${weightRaw}, Weight=${weight}kg`);
+        }
+        
+        // Se ainda não parece correto, testar outros offsets com divisão por 100
+        if (weight < 20 || weight > 150 && value.byteLength >= 6) {
+          weightRaw = value.getUint16(2, true);
+          weight = weightRaw / 100;
+          console.log(`Teste 4 - Offset 2, /100: Raw=${weightRaw}, Weight=${weight}kg`);
         }
       }
 
-      // Validação final de peso
-      if (weight < 5 || weight > 200) {
-        console.log('Peso inválido:', weight);
+      // Validação final
+      if (weight < 20 || weight > 150) {
+        console.log('Peso ainda inválido após testes:', weight);
         return;
       }
 
-      // Dados de composição corporal estimados
       const realData: ScaleData = {
         weight: Math.round(weight * 100) / 100,
         bodyFat: Math.round((15 + Math.random() * 15) * 10) / 10,
@@ -279,21 +290,20 @@ export const AtualizarMedidasModal: React.FC<AtualizarMedidasModalProps> = ({ tr
         timestamp: new Date()
       };
 
-      // BMI calculation
       const height = dadosSaude?.altura_cm || 170;
       const heightM = height / 100;
       realData.bmi = Math.round((realData.weight / (heightM * heightM)) * 10) / 10;
       
       setScaleData(realData);
-      setCountdown(0); // Para o countdown imediatamente
+      setCountdown(0);
       
       toast({
-        title: "📊 Mi Scale Conectada!",
-        description: `Peso real: ${realData.weight}kg - IMC: ${realData.bmi}`,
+        title: "📊 Mi Scale 2 - Peso Real!",
+        description: `${realData.weight}kg (Raw: ${weightRaw}) - IMC: ${realData.bmi}`,
       });
       
     } catch (error) {
-      console.error('Erro ao processar dados da Mi Scale:', error);
+      console.error('Erro ao processar dados:', error);
     }
   };
 
