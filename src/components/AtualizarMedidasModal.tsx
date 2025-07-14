@@ -300,13 +300,6 @@ export const AtualizarMedidasModal: React.FC<AtualizarMedidasModalProps> = ({ tr
       console.log(`🔍 Status: 0x${statusByte.toString(16)}`);
       console.log(`📊 Estabilizado: ${isStabilized}, Removido: ${isWeightRemoved}, Impedância: ${hasImpedance}`);
       
-      // AGUARDAR ESTABILIZAÇÃO - NÃO PROCESSAR SE NÃO ESTIVER ESTABILIZADO
-      if (!isStabilized) {
-        console.log('⏳ Aguardando estabilização do peso...');
-        setIsWaitingStabilization(true);
-        return;
-      }
-      
       // SE PESO FOI REMOVIDO, LIMPAR DADOS
       if (isWeightRemoved) {
         console.log('🚫 Peso removido da balança');
@@ -314,9 +307,6 @@ export const AtualizarMedidasModal: React.FC<AtualizarMedidasModalProps> = ({ tr
         setIsWaitingStabilization(false);
         return;
       }
-
-      console.log('✅ PESO ESTABILIZADO - Processando dados...');
-      setIsWaitingStabilization(false);
 
       // BYTES 1-2: Peso em gramas, little endian
       const weightGrams = value.getUint16(1, true);
@@ -330,11 +320,42 @@ export const AtualizarMedidasModal: React.FC<AtualizarMedidasModalProps> = ({ tr
         return;
       }
 
-      // BYTES 11-12: Impedância (se disponível)
-      let impedance = 0;
-      if (hasImpedance && value.byteLength >= 13) {
-        impedance = value.getUint16(11, true);
-        console.log(`⚡ Impedância: ${impedance}Ω`);
+      // LÓGICA MELHORADA: Aceitar peso após múltiplas leituras consistentes OU se estabilizado
+      const newReadings = [...lastReadings, weight];
+      if (newReadings.length > 3) {
+        newReadings.shift(); // Manter apenas as últimas 3 leituras
+      }
+      setLastReadings(newReadings);
+
+      let shouldAcceptWeight = false;
+      let finalWeight = weight;
+
+      if (isStabilized) {
+        // Se a balança diz que está estabilizado, aceitar imediatamente
+        console.log('✅ BALANÇA REPORTA PESO ESTABILIZADO');
+        shouldAcceptWeight = true;
+        finalWeight = weight;
+      } else if (newReadings.length >= 3) {
+        // Verificar se as últimas 3 leituras são consistentes (variação < 0.5kg)
+        const maxWeight = Math.max(...newReadings);
+        const minWeight = Math.min(...newReadings);
+        const variation = maxWeight - minWeight;
+        
+        if (variation < 0.5) {
+          console.log('✅ PESO ESTABILIZADO POR CONSISTÊNCIA (3 leituras similares)');
+          finalWeight = newReadings.reduce((a, b) => a + b) / newReadings.length; // Média
+          shouldAcceptWeight = true;
+        } else {
+          console.log(`⏳ Aguardando consistência... Variação: ${variation.toFixed(2)}kg`);
+          setIsWaitingStabilization(true);
+        }
+      } else {
+        console.log(`⏳ Coletando leituras... (${newReadings.length}/3)`);
+        setIsWaitingStabilization(true);
+      }
+
+      if (!shouldAcceptWeight) {
+        return; // Continuar aguardando
       }
 
       // Composição corporal com dados reais da balança
@@ -342,12 +363,19 @@ export const AtualizarMedidasModal: React.FC<AtualizarMedidasModalProps> = ({ tr
       let muscleMass = 0;
       let bodyWater = 0;
 
-      // Mi Scale 2 envia dados de impedância nos bytes específicos - usar valor já calculado
+      // BYTES 11-12: Impedância (se disponível)
+      let impedance = 0;
+      if (hasImpedance && value.byteLength >= 13) {
+        impedance = value.getUint16(11, true);
+        console.log(`⚡ Impedância: ${impedance}Ω`);
+      }
+
+      // Mi Scale 2 envia dados de impedância - usar para cálculos
       if (hasImpedance && impedance > 0) {
         // Fórmulas baseadas no protocolo Mi Scale 2
         bodyFat = Math.max(5, Math.min(50, 15 + (impedance / 100)));
         bodyWater = Math.max(30, Math.min(70, 55 + (impedance / 200)));
-        muscleMass = Math.max(weight * 0.2, weight * 0.6);
+        muscleMass = Math.max(finalWeight * 0.2, finalWeight * 0.6);
       }
 
       const realData: ScaleData = {
