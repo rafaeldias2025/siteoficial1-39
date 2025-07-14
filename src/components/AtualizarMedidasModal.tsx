@@ -405,27 +405,33 @@ export const AtualizarMedidasModal: React.FC<AtualizarMedidasModalProps> = ({ tr
           const controlByte = value.getUint8(0);
           console.log(`🏁 Control Byte: 0x${controlByte.toString(16)} (${controlByte})`);
           
-          // Peso principal - Bytes 1-2 (little endian)
-          const weightRaw = value.getUint16(1, true);
-          weight = weightRaw / 200; // Padrão Mi Scale
+          // Peso principal - Bytes 2-3 (little endian) - CORREÇÃO ESPECÍFICA Mi Scale 2
+          const weightRaw = value.getUint16(2, true);
+          weight = weightRaw / 100.0; // Divisão por 100.0 conforme protocolo correto
           
           console.log(`⚖️ Peso RAW: ${weightRaw} → ${weight.toFixed(2)}kg`);
           
           // TENTAR OUTRAS INTERPRETAÇÕES TAMBÉM
-          const weightAlt1 = weightRaw / 100;
-          const weightAlt2 = weightRaw / 1000;
-          const weightBE = value.getUint16(1, false) / 200;
+          const weightAlt1 = weightRaw / 200;
+          const weightAlt2 = value.getUint16(1, true) / 100.0; // Bytes 1-2 como alternativa
+          const weightBE = value.getUint16(2, false) / 100.0;
           
-          console.log(`🔄 Alternativas: ÷100=${weightAlt1.toFixed(2)}kg, ÷1000=${weightAlt2.toFixed(2)}kg, BE=${weightBE.toFixed(2)}kg`);
+          console.log(`🔄 Alternativas: ÷200=${weightAlt1.toFixed(2)}kg, bytes1-2=${weightAlt2.toFixed(2)}kg, BE=${weightBE.toFixed(2)}kg`);
           
-          // Escolher peso mais provável
-          const possibleWeights = [weight, weightAlt1, weightBE];
-          for (const w of possibleWeights) {
-            if (w >= 20 && w <= 200) {
-              weight = w;
-              isValidWeight = true;
-              console.log(`✅ PESO VÁLIDO ESCOLHIDO: ${weight.toFixed(2)}kg`);
-              break;
+          // Validar peso principal primeiro
+          if (weight >= 20 && weight <= 200) {
+            isValidWeight = true;
+            console.log(`✅ PESO PRINCIPAL VÁLIDO: ${weight.toFixed(2)}kg (bytes 2-3 ÷100.0)`);
+          } else {
+            // Tentar alternativas se peso principal não for válido
+            const possibleWeights = [weightAlt1, weightAlt2, weightBE];
+            for (const w of possibleWeights) {
+              if (w >= 20 && w <= 200) {
+                weight = w;
+                isValidWeight = true;
+                console.log(`✅ PESO ALTERNATIVO VÁLIDO: ${weight.toFixed(2)}kg`);
+                break;
+              }
             }
           }
           
