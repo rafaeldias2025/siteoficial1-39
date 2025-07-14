@@ -158,7 +158,6 @@ export const BeneficiosVisuais: React.FC = () => {
                     </Button>
                   }
                 />
-                <BalancaPareamentoCompacto />
               </div>
             </CardContent>
           </Card>
@@ -344,13 +343,8 @@ export const BeneficiosVisuais: React.FC = () => {
         </div>
       </div>
 
-      {/* Opções de Atualização de Medidas */}
-      {dadosSaude && (
-        <div className="fixed bottom-6 right-6 flex flex-col gap-3">
-          <AtualizarMedidasModal />
-          <BalancaPareamentoCompacto />
-        </div>
-      )}
+      {/* Botão Flutuante */}
+      {dadosSaude && <AtualizarMedidasModal />}
     </div>
   );
 };
