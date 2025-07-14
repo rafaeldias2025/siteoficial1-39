@@ -18,6 +18,7 @@ import { MotivationalMessages } from './intelligent/MotivationalMessages';
 import { SmartAnalytics } from './intelligent/SmartAnalytics';
 import { EnhancedRanking } from './visual/EnhancedRanking';
 import { AnimatedButton } from './visual/AnimatedButton';
+import { BalancaPareamento } from './BalancaPareamento';
 import { ClientSessions } from './sessions/ClientSessions';
 import { AdminSessions } from './sessions/AdminSessions';
 import { 
@@ -35,7 +36,8 @@ import {
   Play,
   ChevronRight,
   Video,
-  UserCog
+  UserCog,
+  Scale
 } from 'lucide-react';
 
 // Dados mock para demonstração
@@ -275,6 +277,7 @@ export const MinhaJornada: React.FC = () => {
     if (userType === 'cliente') {
       const clientItems = [
         ...baseItems,
+        { id: 'balanca-pareamento', label: '📡 Atualizar Medidas com Balança', icon: Scale },
         { id: 'sessoes', label: 'Minhas Sessões', icon: Video },
         { id: 'testes-sabotadores', label: 'Testes Sabotadores', icon: BookOpen },
         { id: 'biblioteca', label: 'Biblioteca de Cursos', icon: GraduationCap },
@@ -429,6 +432,16 @@ export const MinhaJornada: React.FC = () => {
           <div className="text-center py-12">
             <h2 className="text-2xl font-bold text-netflix-text mb-4">Área Administrativa</h2>
             <p className="text-netflix-text-muted mb-6">Esta seção é exclusiva para administradores</p>
+          </div>
+        );
+      case 'balanca-pareamento':
+        return userType === 'cliente' ? <BalancaPareamento /> : (
+          <div className="text-center py-12">
+            <h2 className="text-2xl font-bold text-netflix-text mb-4">Área Restrita</h2>
+            <p className="text-netflix-text-muted mb-6">Esta seção é exclusiva para clientes</p>
+            <Button onClick={handleClienteAccess} className="instituto-button">
+              Acessar como Cliente
+            </Button>
           </div>
         );
       case 'metas':
