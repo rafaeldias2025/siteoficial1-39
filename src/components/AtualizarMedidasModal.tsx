@@ -336,50 +336,103 @@ export const AtualizarMedidasModal: React.FC<AtualizarMedidasModalProps> = ({ tr
   };
 
   const handleWeightMeasurement = (event: Event) => {
-    // CAPTURA SIMPLES - sempre que chegam dados, processar
+    // CAPTURA ULTRA AGRESSIVA - registrar TUDO que chega
     const target = event.target as any;
     const value = target.value as DataView;
     
-    if (!value) return;
+    console.log('🔥 EVENTO RECEBIDO DA BALANÇA!');
+    
+    if (!value) {
+      console.log('❌ Valor vazio recebido');
+      return;
+    }
+
+    console.log('📦 DADOS BRUTOS:', {
+      byteLength: value.byteLength,
+      buffer: value.buffer,
+      isWeighing: isWeighing
+    });
 
     try {
-      console.log('🎯 DADOS RECEBIDOS - Bytes:', value.byteLength);
-      const hexData = Array.from(new Uint8Array(value.buffer)).map(b => b.toString(16).padStart(2, '0')).join(' ');
-      console.log('🔢 HEX:', hexData);
-      
-      if (value.byteLength < 3) {
-        console.log('❌ Dados muito pequenos');
-        return;
-      }
-
-      // TENTATIVA 1: Mi Scale - bytes 1-2, little endian, dividido por 200
-      let weight1 = value.getUint16(1, true) / 200;
-      
-      // TENTATIVA 2: Outros protocolos
-      let weight2 = value.getUint16(1, true) / 100;
-      let weight3 = value.getUint16(0, true) / 200;
-      
-      console.log(`📊 Tentativas: ${weight1.toFixed(2)}kg, ${weight2.toFixed(2)}kg, ${weight3.toFixed(2)}kg`);
-      
-      // Escolher peso mais provável (20-200kg)
-      const validWeights = [weight1, weight2, weight3].filter(w => w >= 20 && w <= 200);
-      
-      if (validWeights.length === 0) {
-        console.log('❌ Nenhum peso válido encontrado');
-        return;
+      // Mostrar TODOS os bytes recebidos
+      const allBytes = [];
+      for (let i = 0; i < value.byteLength; i++) {
+        allBytes.push(value.getUint8(i));
       }
       
-      const weight = validWeights[0];
-      console.log(`✅ PESO VÁLIDO: ${weight.toFixed(2)}kg`);
+      console.log('🔢 TODOS OS BYTES:', allBytes);
+      console.log('🔤 HEX:', allBytes.map(b => b.toString(16).padStart(2, '0')).join(' '));
+      console.log('📊 DECIMAL:', allBytes.join(', '));
       
-      // Adicionar à lista de leituras
-      const newReadings = [...lastReadings, { weight, timestamp: Date.now() }];
-      setLastReadings(newReadings);
+      // TENTAR EXTRAIR PESO DE TODAS AS FORMAS POSSÍVEIS
+      const possibleWeights = [];
       
-      console.log(`📊 Total de leituras: ${newReadings.length}`);
+      // Se tem pelo menos 2 bytes, tentar interpretações
+      if (value.byteLength >= 2) {
+        // Tentativa 1: Bytes 0-1, little endian
+        try {
+          const w1 = value.getUint16(0, true);
+          possibleWeights.push({ method: 'bytes_0-1_LE', raw: w1, div200: w1/200, div100: w1/100, div1000: w1/1000 });
+        } catch (e) { console.log('Erro tentativa 1:', e); }
+        
+        // Tentativa 2: Bytes 0-1, big endian
+        try {
+          const w2 = value.getUint16(0, false);
+          possibleWeights.push({ method: 'bytes_0-1_BE', raw: w2, div200: w2/200, div100: w2/100, div1000: w2/1000 });
+        } catch (e) { console.log('Erro tentativa 2:', e); }
+      }
+      
+      // Se tem pelo menos 3 bytes
+      if (value.byteLength >= 3) {
+        // Tentativa 3: Bytes 1-2, little endian (protocolo Mi Scale)
+        try {
+          const w3 = value.getUint16(1, true);
+          possibleWeights.push({ method: 'bytes_1-2_LE', raw: w3, div200: w3/200, div100: w3/100, div1000: w3/1000 });
+        } catch (e) { console.log('Erro tentativa 3:', e); }
+        
+        // Tentativa 4: Bytes 1-2, big endian
+        try {
+          const w4 = value.getUint16(1, false);
+          possibleWeights.push({ method: 'bytes_1-2_BE', raw: w4, div200: w4/200, div100: w4/100, div1000: w4/1000 });
+        } catch (e) { console.log('Erro tentativa 4:', e); }
+      }
+      
+      console.log('🎯 POSSÍVEIS PESOS:', possibleWeights);
+      
+      // Encontrar peso mais provável (10-300kg)
+      let bestWeight = null;
+      for (const attempt of possibleWeights) {
+        const weights = [attempt.div200, attempt.div100, attempt.div1000];
+        for (const w of weights) {
+          if (w >= 10 && w <= 300) {
+            bestWeight = { weight: w, method: attempt.method, raw: attempt.raw };
+            console.log(`✅ PESO DETECTADO: ${w.toFixed(2)}kg (${attempt.method}, raw: ${attempt.raw})`);
+            break;
+          }
+        }
+        if (bestWeight) break;
+      }
+      
+      if (bestWeight) {
+        // Adicionar à lista de leituras
+        const newReadings = [...lastReadings, { weight: bestWeight.weight, timestamp: Date.now() }];
+        setLastReadings(newReadings);
+        console.log(`📊 LEITURA ADICIONADA! Total: ${newReadings.length}`);
+        
+        // Mostrar peso em tempo real no toast se estiver pesando
+        if (isWeighing) {
+          toast({
+            title: `⚖️ Peso: ${bestWeight.weight.toFixed(1)}kg`,
+            description: `Método: ${bestWeight.method} | Leituras: ${newReadings.length}`,
+            duration: 1000,
+          });
+        }
+      } else {
+        console.log('❌ NENHUM PESO VÁLIDO ENCONTRADO NOS DADOS');
+      }
       
     } catch (error) {
-      console.error('❌ Erro ao processar dados:', error);
+      console.error('❌ ERRO CRÍTICO ao processar dados:', error);
     }
   };
 
