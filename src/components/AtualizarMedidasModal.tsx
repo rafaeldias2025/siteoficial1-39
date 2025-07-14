@@ -289,33 +289,53 @@ export const AtualizarMedidasModal: React.FC<AtualizarMedidasModalProps> = ({ tr
   };
 
   const handleWeightMeasurement = (event: Event) => {
-    // Só processar se estiver pesando
-    if (!isWeighing) {
-      console.log('📊 Dados recebidos mas não está pesando - ignorando');
-      return;
-    }
-
     const target = event.target as any;
     const value = target.value as DataView;
     
     if (!value) return;
 
     try {
-      console.log('🎯 Mi Scale 2 - Dados de pesagem:', value.byteLength, 'bytes');
+      console.log('🎯 DADOS RECEBIDOS DA BALANÇA - Pesando:', isWeighing);
+      console.log('📦 Bytes recebidos:', value.byteLength);
       const hexData = Array.from(new Uint8Array(value.buffer)).map(b => b.toString(16).padStart(2, '0')).join(' ');
-      console.log('Hex:', hexData);
+      console.log('🔢 Dados HEX:', hexData);
       
-      // PROTOCOLO Mi Scale 2 - SIMPLIFICADO para evitar cancelamentos
+      // Sempre processar dados da balança independente do estado
       if (value.byteLength < 3) {
-        console.log('❌ Dados insuficientes');
+        console.log('❌ Dados insuficientes - precisa pelo menos 3 bytes');
         return;
       }
 
-      // Peso nos bytes 1-2, little endian, dividido por 200
-      const weightRaw = value.getUint16(1, true);
-      let weight = weightRaw / 200;
+      // Tentativa de múltiplos protocolos para maior compatibilidade
+      let weight = 0;
       
-      console.log(`📊 Mi Scale 2 - Raw: ${weightRaw}, Peso: ${weight}kg`);
+      // Protocolo 1: Mi Scale 2 - bytes 1-2, little endian, dividido por 200
+      const weightRaw1 = value.getUint16(1, true);
+      const weight1 = weightRaw1 / 200;
+      console.log(`📊 Protocolo 1 - Raw: ${weightRaw1}, Peso: ${weight1}kg`);
+      
+      // Protocolo 2: Alguns modelos usam divisão por 100
+      const weight2 = weightRaw1 / 100;
+      console.log(`📊 Protocolo 2 - Raw: ${weightRaw1}, Peso: ${weight2}kg`);
+      
+      // Protocolo 3: Big endian
+      if (value.byteLength >= 3) {
+        const weightRaw3 = value.getUint16(1, false);
+        const weight3 = weightRaw3 / 200;
+        console.log(`📊 Protocolo 3 - Raw: ${weightRaw3}, Peso: ${weight3}kg`);
+      }
+      
+      // Escolher o peso mais provável (entre 20kg e 200kg)
+      const weights = [weight1, weight2];
+      const validWeights = weights.filter(w => w >= 20 && w <= 200);
+      
+      if (validWeights.length > 0) {
+        weight = validWeights[0];
+        console.log(`✅ PESO DETECTADO: ${weight}kg`);
+      } else {
+        console.log('❌ Nenhum peso válido encontrado:', weights);
+        return;
+      }
       
       // Validação básica de peso realista
       if (weight < 10 || weight > 300) {
