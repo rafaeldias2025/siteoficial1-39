@@ -183,86 +183,79 @@ export const AtualizarMedidasModal: React.FC<AtualizarMedidasModalProps> = ({ tr
       return;
     }
 
+    console.log('🎯 INICIANDO PESAGEM SIMPLES');
     setIsWeighing(true);
-    setIsWaitingStabilization(true);
     setLastReadings([]);
     setScaleData(null);
-    setCountdown(5); // Timer de 5 segundos
+    setCountdown(8); // 8 segundos para pesagem
     
     toast({
       title: "⚖️ Pesagem Iniciada",
-      description: "Suba na balança agora! Timer de 5 segundos",
+      description: "Suba na balança agora!",
       duration: 3000,
     });
 
-    console.log('🎯 PESAGEM INICIADA - Timer de 5 segundos');
-    
-    // Timer visual de 5 segundos
-    let timeLeft = 5;
+    // Timer de 8 segundos
+    let timeLeft = 8;
     const timer = setInterval(() => {
       timeLeft--;
       setCountdown(timeLeft);
-      console.log(`⏰ Timer: ${timeLeft}s restantes`);
       
       if (timeLeft <= 0) {
         clearInterval(timer);
-        processWeightData();
+        finalizePesagem();
       }
     }, 1000);
   };
 
-  const processWeightData = () => {
-    console.log('🔄 PROCESSANDO DADOS COLETADOS...');
+  const finalizePesagem = () => {
+    console.log('⏰ FINALIZANDO PESAGEM...');
+    console.log(`📊 Total de leituras coletadas: ${lastReadings.length}`);
     
     if (lastReadings.length === 0) {
+      console.log('❌ NENHUMA LEITURA COLETADA');
       toast({
-        title: "❌ Nenhum dado coletado",
-        description: "Não foram detectados dados da balança. Tente novamente.",
+        title: "❌ Nenhum peso detectado",
+        description: "Tente novamente - certifique-se de estar na balança",
         variant: "destructive",
       });
       setIsWeighing(false);
-      setIsWaitingStabilization(false);
       return;
     }
 
-    // Calcular média dos pesos coletados
+    // Pegar a última leitura válida
     const weights = lastReadings.map(r => r.weight);
-    const averageWeight = weights.reduce((a, b) => a + b) / weights.length;
-    const finalWeight = Math.round(averageWeight * 100) / 100;
+    const lastWeight = weights[weights.length - 1];
+    const finalWeight = Math.round(lastWeight * 100) / 100;
     
-    console.log(`✅ PESO FINAL: ${finalWeight}kg (baseado em ${weights.length} leituras)`);
+    console.log(`✅ PESO CAPTURADO: ${finalWeight}kg`);
 
-    // Composição corporal com estimativas
-    const bodyFat = Math.max(5, Math.min(50, 15 + Math.random() * 20));
-    const bodyWater = Math.max(30, Math.min(70, 50 + Math.random() * 20));
-    const muscleMass = Math.max(finalWeight * 0.2, finalWeight * 0.6);
-
-    const realData: ScaleData = {
+    // Criar dados completos
+    const pesagemData: ScaleData = {
       weight: finalWeight,
-      bodyFat: Math.round(bodyFat * 10) / 10,
-      muscleMass: Math.round(muscleMass * 10) / 10,
-      bodyWater: Math.round(bodyWater * 10) / 10,
-      basalMetabolism: Math.round(1200 + (finalWeight * 15) + (muscleMass * 25)),
+      bodyFat: Math.round((12 + Math.random() * 25) * 10) / 10,
+      muscleMass: Math.round((finalWeight * 0.35) * 10) / 10,
+      bodyWater: Math.round((50 + Math.random() * 15) * 10) / 10,
+      basalMetabolism: Math.round(1200 + (finalWeight * 15)),
       timestamp: new Date()
     };
 
-    // Cálculo do IMC
+    // Calcular IMC
     const height = dadosSaude?.altura_cm || 170;
     const heightM = height / 100;
-    realData.bmi = Math.round((realData.weight / (heightM * heightM)) * 10) / 10;
+    pesagemData.bmi = Math.round((finalWeight / (heightM * heightM)) * 10) / 10;
     
-    setScaleData(realData);
-    setLastReadings([]);
+    setScaleData(pesagemData);
     setIsWeighing(false);
-    setIsWaitingStabilization(false);
+    setLastReadings([]);
     
     toast({
-      title: "✅ Pesagem Concluída!",
-      description: `Peso: ${realData.weight}kg | IMC: ${realData.bmi} | ${weights.length} leituras processadas`,
-      duration: 8000,
+      title: "✅ Peso Capturado!",
+      description: `${finalWeight}kg | IMC: ${pesagemData.bmi}`,
+      duration: 5000,
     });
     
-    console.log('✅ Pesagem finalizada:', realData);
+    console.log('✅ PESAGEM FINALIZADA:', pesagemData);
   };
 
   const connectToDevice = async (bluetoothDevice: any) => {
@@ -343,98 +336,50 @@ export const AtualizarMedidasModal: React.FC<AtualizarMedidasModalProps> = ({ tr
   };
 
   const handleWeightMeasurement = (event: Event) => {
+    // CAPTURA SIMPLES - sempre que chegam dados, processar
     const target = event.target as any;
     const value = target.value as DataView;
     
-    if (!value || !isWeighing) return;
+    if (!value) return;
 
     try {
-      console.log('🎯 DADOS DA MI SCALE 2 - Bytes:', value.byteLength);
+      console.log('🎯 DADOS RECEBIDOS - Bytes:', value.byteLength);
       const hexData = Array.from(new Uint8Array(value.buffer)).map(b => b.toString(16).padStart(2, '0')).join(' ');
-      console.log('🔢 Dados HEX:', hexData);
+      console.log('🔢 HEX:', hexData);
       
       if (value.byteLength < 3) {
-        console.log('❌ Dados insuficientes');
+        console.log('❌ Dados muito pequenos');
         return;
       }
 
-      // BYTES 1-2: Peso em gramas, little endian
-      const weightGrams = value.getUint16(1, true);
-      const weight = weightGrams / 200; // Convertendo para kg
+      // TENTATIVA 1: Mi Scale - bytes 1-2, little endian, dividido por 200
+      let weight1 = value.getUint16(1, true) / 200;
       
-      console.log(`📊 Peso RAW: ${weightGrams}, Peso Final: ${weight}kg`);
+      // TENTATIVA 2: Outros protocolos
+      let weight2 = value.getUint16(1, true) / 100;
+      let weight3 = value.getUint16(0, true) / 200;
       
-      // Validação de peso realista
-      if (weight < 10 || weight > 300) {
-        console.log('❌ Peso fora do range válido:', weight);
+      console.log(`📊 Tentativas: ${weight1.toFixed(2)}kg, ${weight2.toFixed(2)}kg, ${weight3.toFixed(2)}kg`);
+      
+      // Escolher peso mais provável (20-200kg)
+      const validWeights = [weight1, weight2, weight3].filter(w => w >= 20 && w <= 200);
+      
+      if (validWeights.length === 0) {
+        console.log('❌ Nenhum peso válido encontrado');
         return;
       }
-
-      // ESTABILIZAÇÃO BASEADA EM TEMPO: Coletar por 3 segundos e pegar a média das últimas leituras
+      
+      const weight = validWeights[0];
+      console.log(`✅ PESO VÁLIDO: ${weight.toFixed(2)}kg`);
+      
+      // Adicionar à lista de leituras
       const newReadings = [...lastReadings, { weight, timestamp: Date.now() }];
+      setLastReadings(newReadings);
       
-      // Manter apenas leituras dos últimos 3 segundos
-      const threeSecondsAgo = Date.now() - 3000;
-      const recentReadings = newReadings.filter(reading => reading.timestamp > threeSecondsAgo);
-      
-      setLastReadings(recentReadings);
-      
-      console.log(`📊 Leituras recentes: ${recentReadings.length}`);
-      
-      // Após 3 segundos de leituras, calcular a média e aceitar
-      if (recentReadings.length >= 5 && (Date.now() - recentReadings[0].timestamp) >= 3000) {
-        const weights = recentReadings.map(r => r.weight);
-        const averageWeight = weights.reduce((a, b) => a + b) / weights.length;
-        const variance = Math.sqrt(weights.reduce((a, b) => a + Math.pow(b - averageWeight, 2), 0) / weights.length);
-        
-        console.log(`✅ ESTABILIZAÇÃO POR TEMPO: Média: ${averageWeight.toFixed(2)}kg, Variância: ${variance.toFixed(3)}`);
-        
-        setIsWaitingStabilization(false);
-        const finalWeight = Math.round(averageWeight * 100) / 100;
-        
-        // Composição corporal com estimativas
-        const bodyFat = Math.max(5, Math.min(50, 15 + Math.random() * 20));
-        const bodyWater = Math.max(30, Math.min(70, 50 + Math.random() * 20));
-        const muscleMass = Math.max(finalWeight * 0.2, finalWeight * 0.6);
-
-        const realData: ScaleData = {
-          weight: finalWeight,
-          bodyFat: Math.round(bodyFat * 10) / 10,
-          muscleMass: Math.round(muscleMass * 10) / 10,
-          bodyWater: Math.round(bodyWater * 10) / 10,
-          basalMetabolism: Math.round(1200 + (finalWeight * 15) + (muscleMass * 25)),
-          timestamp: new Date()
-        };
-
-        // Cálculo do IMC
-        const height = dadosSaude?.altura_cm || 170;
-        const heightM = height / 100;
-        realData.bmi = Math.round((realData.weight / (heightM * heightM)) * 10) / 10;
-        
-        setScaleData(realData);
-        setLastReadings([]);
-        setIsWeighing(false);
-        
-        toast({
-          title: "✅ Pesagem Concluída!",
-          description: `Peso: ${realData.weight}kg | IMC: ${realData.bmi}`,
-          duration: 8000,
-        });
-        
-        console.log('✅ Pesagem finalizada:', realData);
-      } else {
-        setIsWaitingStabilization(true);
-        const remainingTime = Math.max(0, 3 - (Date.now() - (recentReadings[0]?.timestamp || Date.now())) / 1000);
-        console.log(`⏳ Coletando por mais ${remainingTime.toFixed(1)}s...`);
-      }
+      console.log(`📊 Total de leituras: ${newReadings.length}`);
       
     } catch (error) {
-      console.error('❌ Erro ao processar dados da Mi Scale:', error);
-      toast({
-        title: "Erro na Mi Scale",
-        description: "Erro ao processar dados da balança. Verifique a conexão.",
-        variant: "destructive",
-      });
+      console.error('❌ Erro ao processar dados:', error);
     }
   };
 
@@ -584,7 +529,7 @@ export const AtualizarMedidasModal: React.FC<AtualizarMedidasModalProps> = ({ tr
                             <div className="mt-3 bg-blue-200 rounded-full h-2">
                               <div 
                                 className="bg-blue-600 h-2 rounded-full transition-all duration-1000"
-                                style={{ width: `${((5 - countdown) / 5) * 100}%` }}
+                                style={{ width: `${((8 - countdown) / 8) * 100}%` }}
                               />
                             </div>
                           )}
