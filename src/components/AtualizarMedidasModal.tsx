@@ -184,31 +184,17 @@ export const AtualizarMedidasModal: React.FC<AtualizarMedidasModalProps> = ({ tr
     }
 
     setIsWeighing(true);
-    setCountdown(15);
-    setIsWaitingStabilization(false);
+    setIsWaitingStabilization(true);
     setLastReadings([]);
+    setScaleData(null);
     
     toast({
-      title: "⚖️ Iniciando pesagem",
-      description: "Suba na balança e aguarde a estabilização",
+      title: "⚖️ Pesagem Ativa",
+      description: "Suba na balança - aguarda estabilização automática",
+      duration: 3000,
     });
 
-    // Timer de pesagem
-    let timeLeft = 15;
-    const timer = setInterval(() => {
-      timeLeft--;
-      setCountdown(timeLeft);
-      
-      if (timeLeft <= 0) {
-        clearInterval(timer);
-        setIsWeighing(false);
-        // NÃO cancelar automaticamente - apenas parar o timer
-        toast({
-          title: "⏰ Tempo de pesagem finalizado",
-          description: "Você pode tentar pesar novamente se necessário",
-        });
-      }
-    }, 1000);
+    console.log('🎯 Pesagem ativada - sem limite de tempo, aguarda estabilização');
   };
 
   const connectToDevice = async (bluetoothDevice: any) => {
@@ -531,40 +517,38 @@ export const AtualizarMedidasModal: React.FC<AtualizarMedidasModalProps> = ({ tr
                         ⚖️ Iniciar Pesagem
                       </Button>
                     ) : (
-                      <div className="text-center">
-                        <div className="space-y-2">
-                          <div className="flex items-center justify-center gap-2 text-lg font-bold text-blue-600">
-                            <Timer className="h-5 w-5" />
-                            {countdown}s
+                      <div className="text-center space-y-3">
+                        <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg">
+                          <div className="flex items-center justify-center gap-2 text-lg font-bold text-blue-600 mb-2">
+                            <Timer className="h-5 w-5 animate-pulse" />
+                            Pesagem Ativa
                           </div>
-                          <p className="text-sm text-muted-foreground">
-                            {countdown > 5 
-                              ? "🔵 Suba na balança agora"
-                              : "⚖️ Aguardando estabilização..."
+                          <p className="text-sm text-blue-700">
+                            {isWaitingStabilization
+                              ? "⏳ Aguardando estabilização do peso..."
+                              : "⚖️ Suba na balança agora"
                             }
                           </p>
                         </div>
+                        
+                        <Button 
+                          onClick={cancelMeasurement}
+                          variant="outline"
+                          size="lg"
+                          className="w-full border-red-200 text-red-600 hover:bg-red-50"
+                        >
+                          <X className="h-4 w-4 mr-2" />
+                          ⏹️ Parar Pesagem
+                        </Button>
                       </div>
                     )}
                     
                     <div className="flex gap-2">
-                      {isWeighing && (
-                        <Button 
-                          onClick={cancelMeasurement}
-                          variant="outline"
-                          size="sm"
-                          className="flex-1 border-red-200 text-red-600 hover:bg-red-50"
-                        >
-                          <X className="h-4 w-4 mr-2" />
-                          Cancelar Pesagem
-                        </Button>
-                      )}
-                      
                       <Button 
                         onClick={disconnectScale}
                         variant="outline"
                         size="sm"
-                        className={`${isWeighing ? 'flex-1' : 'w-full'} border-gray-200 text-gray-600 hover:bg-gray-50`}
+                        className="w-full border-gray-200 text-gray-600 hover:bg-gray-50"
                       >
                         <Bluetooth className="h-4 w-4 mr-2" />
                         Desconectar
