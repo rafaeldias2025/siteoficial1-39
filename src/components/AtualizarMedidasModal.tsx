@@ -295,91 +295,73 @@ export const AtualizarMedidasModal: React.FC<AtualizarMedidasModalProps> = ({ tr
     if (!value) return;
 
     try {
-      console.log('🎯 DADOS RECEBIDOS DA BALANÇA - Pesando:', isWeighing);
-      console.log('📦 Bytes recebidos:', value.byteLength);
+      console.log('🎯 DADOS DA MI SCALE 2 - Bytes:', value.byteLength);
       const hexData = Array.from(new Uint8Array(value.buffer)).map(b => b.toString(16).padStart(2, '0')).join(' ');
       console.log('🔢 Dados HEX:', hexData);
       
-      // Sempre processar dados da balança independente do estado
-      if (value.byteLength < 3) {
-        console.log('❌ Dados insuficientes - precisa pelo menos 3 bytes');
+      // Mi Scale 2 Protocol - Baseado no openScale
+      if (value.byteLength < 13) {
+        console.log('❌ Dados insuficientes - precisa pelo menos 13 bytes para Mi Scale 2');
         return;
       }
 
-      // Tentativa de múltiplos protocolos para maior compatibilidade
-      let weight = 0;
+      // BYTE 0: Status e flags (crucial para estabilização)
+      const statusByte = value.getUint8(0);
+      const isStabilized = (statusByte & 0x20) === 0x20; // Bit 5: peso estabilizado
+      const isWeightRemoved = (statusByte & 0x80) === 0x80; // Bit 7: peso removido
+      const hasImpedance = (statusByte & 0x02) === 0x02; // Bit 1: tem impedância
       
-      // Protocolo 1: Mi Scale 2 - bytes 1-2, little endian, dividido por 200
-      const weightRaw1 = value.getUint16(1, true);
-      const weight1 = weightRaw1 / 200;
-      console.log(`📊 Protocolo 1 - Raw: ${weightRaw1}, Peso: ${weight1}kg`);
+      console.log(`🔍 Status: 0x${statusByte.toString(16)}`);
+      console.log(`📊 Estabilizado: ${isStabilized}, Removido: ${isWeightRemoved}, Impedância: ${hasImpedance}`);
       
-      // Protocolo 2: Alguns modelos usam divisão por 100
-      const weight2 = weightRaw1 / 100;
-      console.log(`📊 Protocolo 2 - Raw: ${weightRaw1}, Peso: ${weight2}kg`);
-      
-      // Protocolo 3: Big endian
-      if (value.byteLength >= 3) {
-        const weightRaw3 = value.getUint16(1, false);
-        const weight3 = weightRaw3 / 200;
-        console.log(`📊 Protocolo 3 - Raw: ${weightRaw3}, Peso: ${weight3}kg`);
-      }
-      
-      // Escolher o peso mais provável (entre 20kg e 200kg)
-      const weights = [weight1, weight2];
-      const validWeights = weights.filter(w => w >= 20 && w <= 200);
-      
-      if (validWeights.length > 0) {
-        weight = validWeights[0];
-        console.log(`✅ PESO DETECTADO: ${weight}kg`);
-      } else {
-        console.log('❌ Nenhum peso válido encontrado:', weights);
+      // AGUARDAR ESTABILIZAÇÃO - NÃO PROCESSAR SE NÃO ESTIVER ESTABILIZADO
+      if (!isStabilized) {
+        console.log('⏳ Aguardando estabilização do peso...');
+        setIsWaitingStabilization(true);
         return;
       }
       
-      // Validação básica de peso realista
+      // SE PESO FOI REMOVIDO, LIMPAR DADOS
+      if (isWeightRemoved) {
+        console.log('🚫 Peso removido da balança');
+        setScaleData(null);
+        setIsWaitingStabilization(false);
+        return;
+      }
+
+      console.log('✅ PESO ESTABILIZADO - Processando dados...');
+      setIsWaitingStabilization(false);
+
+      // BYTES 1-2: Peso em gramas, little endian
+      const weightGrams = value.getUint16(1, true);
+      const weight = weightGrams / 200; // Convertendo de unidades para kg
+      
+      console.log(`📊 Peso RAW: ${weightGrams}, Peso Final: ${weight}kg`);
+      
+      // Validação de peso realista
       if (weight < 10 || weight > 300) {
         console.log('❌ Peso fora do range válido:', weight);
         return;
       }
 
-      // SIMPLIFICADO: Aceitar o peso após 2 leituras similares
-      const newReadings = [...lastReadings, weight];
-      if (newReadings.length > 2) {
-        newReadings.shift();
+      // BYTES 11-12: Impedância (se disponível)
+      let impedance = 0;
+      if (hasImpedance && value.byteLength >= 13) {
+        impedance = value.getUint16(11, true);
+        console.log(`⚡ Impedância: ${impedance}Ω`);
       }
-      setLastReadings(newReadings);
-
-      if (newReadings.length >= 2) {
-        const variation = Math.abs(newReadings[1] - newReadings[0]);
-        if (variation < 0.3) { // Mais tolerante
-          weight = (newReadings[0] + newReadings[1]) / 2; // Média das 2 leituras
-        } else {
-          console.log('⏳ Aguardando estabilização...', newReadings);
-          return;
-        }
-      } else {
-        return; // Aguardar mais leituras
-      }
-
-      setIsWaitingStabilization(false);
 
       // Composição corporal com dados reais da balança
       let bodyFat = 0;
       let muscleMass = 0;
       let bodyWater = 0;
-      let impedance = 0;
 
-      // Mi Scale 2 envia dados de impedância nos bytes específicos
-      if (value.byteLength >= 13) {
-        impedance = value.getUint16(9, true);
-        
-        if (impedance > 0) {
-          // Fórmulas baseadas no protocolo Mi Scale 2
-          bodyFat = Math.max(5, Math.min(50, 15 + (impedance / 100)));
-          bodyWater = Math.max(30, Math.min(70, 55 + (impedance / 200)));
-          muscleMass = Math.max(weight * 0.2, weight * 0.6);
-        }
+      // Mi Scale 2 envia dados de impedância nos bytes específicos - usar valor já calculado
+      if (hasImpedance && impedance > 0) {
+        // Fórmulas baseadas no protocolo Mi Scale 2
+        bodyFat = Math.max(5, Math.min(50, 15 + (impedance / 100)));
+        bodyWater = Math.max(30, Math.min(70, 55 + (impedance / 200)));
+        muscleMass = Math.max(weight * 0.2, weight * 0.6);
       }
 
       const realData: ScaleData = {
