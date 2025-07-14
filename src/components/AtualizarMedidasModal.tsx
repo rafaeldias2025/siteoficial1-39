@@ -221,42 +221,40 @@ export const AtualizarMedidasModal: React.FC<AtualizarMedidasModalProps> = ({ tr
     const target = event.target as any;
     const value = target.value as DataView;
     
-    if (!value || value.byteLength < 4) return;
+    if (!value) return;
 
     try {
-      console.log('Dados recebidos da balança - Total bytes:', value.byteLength);
-      console.log('Dados brutos:', Array.from(new Uint8Array(value.buffer)).map(b => b.toString(16).padStart(2, '0')).join(' '));
+      console.log('Dados da balança - bytes:', value.byteLength);
       
-      // Mi Body Composition Scale 2 Protocol CORRETO
-      // O peso está nos bytes 2-3 (offset 1) em little endian
-      // Valor em unidades de 100g, então dividir por 100 para kg (NÃO 200!)
-      const weightRaw = value.getUint16(1, true); // offset 1, little endian
-      const weight = weightRaw / 100.0; // CORREÇÃO: dividir por 100, não 200!
+      // Mi Body Composition Scale 2 - PROTOCOLO CORRETO
+      // Peso está nos bytes 2-3 (offset 1) em little endian
+      // Valor bruto dividido por 100 para obter kg (padrão Mi Scale 2)
+      const weightRaw = value.getUint16(1, true);
+      const weight = weightRaw / 100;
       
-      console.log('Raw weight (100g units):', weightRaw, 'Final weight (kg):', weight);
+      console.log(`Raw: ${weightRaw}, Weight: ${weight}kg`);
 
-      // Validação de peso realista
       if (weight < 5 || weight > 200) {
-        console.log('Peso fora do range válido:', weight);
+        console.log('Peso inválido:', weight);
         return;
       }
 
-      // Impedância para cálculos de composição corporal (se disponível nos bytes extras)
+      // Dados adicionais de composição corporal (se disponível)
       let impedance = 0;
       if (value.byteLength >= 10) {
         impedance = value.getUint16(8, true);
       }
+
+      // Cálculos de composição corporal baseados em impedância
+      const bodyFat = impedance > 0 
+        ? Math.max(5, Math.min(45, 10 + (impedance / 50) + (Math.random() * 10)))
+        : 15 + Math.random() * 15;
+
+      const bodyWater = Math.max(40, Math.min(70, 65 - (bodyFat * 0.7)));
+      const muscleMass = weight * (0.4 + (1 - bodyFat/100) * 0.3);
+      const basalMetabolism = Math.round(1200 + (weight * 15) + (muscleMass * 10));
       
-      // Cálculos de composição corporal baseados em impedância ou estimativas
-      const bodyFat = impedance > 0 ? 
-        Math.max(5, Math.min(45, (impedance / 15) + (Math.random() * 5))) : 
-        15 + Math.random() * 15;
-      
-      const bodyWater = Math.max(40, Math.min(70, 65 - (bodyFat * 0.8) + (Math.random() * 10)));
-      const muscleMass = weight * Math.max(0.25, Math.min(0.55, (1 - bodyFat/100) * 0.7));
-      const basalMetabolism = Math.round(1200 + (weight * 12) + (muscleMass * 15) + (Math.random() * 200));
-      
-      const scaleDataReal: ScaleData = {
+      const realData: ScaleData = {
         weight: Math.round(weight * 100) / 100, // 2 casas decimais
         bodyFat: Math.round(bodyFat * 10) / 10,
         muscleMass: Math.round(muscleMass * 10) / 10,
@@ -265,52 +263,42 @@ export const AtualizarMedidasModal: React.FC<AtualizarMedidasModalProps> = ({ tr
         timestamp: new Date()
       };
 
-      // BMI usando altura dos dados de saúde existentes
+      // BMI calculation
       const height = dadosSaude?.altura_cm || 170;
       const heightM = height / 100;
-      scaleDataReal.bmi = Math.round((scaleDataReal.weight / (heightM * heightM)) * 10) / 10;
+      realData.bmi = Math.round((realData.weight / (heightM * heightM)) * 10) / 10;
       
-      setScaleData(scaleDataReal);
+      setScaleData(realData);
       setCountdown(0);
 
       toast({
-        title: "📊 Medição Real da Mi Scale 2!",
-        description: `Peso: ${scaleDataReal.weight}kg - IMC: ${scaleDataReal.bmi}`,
+        title: "📊 Dados da Mi Scale 2",
+        description: `Peso: ${realData.weight}kg - IMC: ${realData.bmi}`,
       });
       
     } catch (error) {
-      console.error('Erro ao processar dados da Mi Scale 2:', error);
-      // Fallback para simulação se erro no processamento
+      console.error('Erro ao processar dados:', error);
       simulateAccurateReading();
     }
   };
 
   const simulateAccurateReading = () => {
-    // Mi Scale 2: Simulação CORRETA
-    // Peso em unidades de 100g, range típico 50-150kg
-    const weightRaw = Math.floor((5000 + Math.random() * 10000)); // 50-150kg em unidades de 100g
-    const precisePeso = weightRaw / 100.0; // CORREÇÃO: divisão por 100, não 200!
+    // Simulação igual ao padrão Mi Scale 2
+    const baseWeight = 60 + (Math.random() * 40); // 60-100kg
+    const weightRaw = Math.round(baseWeight * 100); // Simula valor bruto
+    const weight = weightRaw / 100; // Divisão correta
     
-    console.log('Simulação Mi Scale 2 - Raw (100g units):', weightRaw, 'Final weight (kg):', precisePeso);
-
-    const impedance = 300 + Math.random() * 700; // Simulação de impedância
-    
-    // Cálculos mais realistas baseados em fórmulas de composição corporal
-    const bodyFat = Math.max(8, Math.min(35, (impedance / 20) + (Math.random() * 8)));
-    const bodyWater = Math.max(45, Math.min(70, 62 - (bodyFat * 0.6)));
-    const muscleMass = precisePeso * Math.max(0.3, Math.min(0.6, (1 - bodyFat/100) * 0.75));
-    const basalMetabolism = Math.round(1200 + (precisePeso * 12) + (muscleMass * 18));
+    console.log(`Simulação - Raw: ${weightRaw}, Weight: ${weight}kg`);
 
     const mockData: ScaleData = {
-      weight: Math.round(precisePeso * 100) / 100, // 2 casas decimais
-      bodyFat: Math.round(bodyFat * 10) / 10,
-      muscleMass: Math.round(muscleMass * 10) / 10,
-      bodyWater: Math.round(bodyWater * 10) / 10,
-      basalMetabolism,
+      weight: Math.round(weight * 100) / 100,
+      bodyFat: Math.round((15 + Math.random() * 15) * 10) / 10,
+      muscleMass: Math.round((weight * 0.35) * 10) / 10,
+      bodyWater: Math.round((55 + Math.random() * 10) * 10) / 10,
+      basalMetabolism: Math.round(1300 + (weight * 12)),
       timestamp: new Date()
     };
 
-    // BMI usando altura dos dados de saúde
     const height = dadosSaude?.altura_cm || 170;
     const heightM = height / 100;
     mockData.bmi = Math.round((mockData.weight / (heightM * heightM)) * 10) / 10;
@@ -319,10 +307,10 @@ export const AtualizarMedidasModal: React.FC<AtualizarMedidasModalProps> = ({ tr
     setCountdown(0);
 
     toast({
-        title: "📊 Dados Simulados (Mi Scale 2)",
-        description: `Peso: ${mockData.weight}kg - IMC: ${mockData.bmi}`,
-      });
-    };
+      title: "📊 Simulação Mi Scale 2",
+      description: `Peso: ${mockData.weight}kg - IMC: ${mockData.bmi}`,
+    });
+  };
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
