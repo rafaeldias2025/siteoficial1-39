@@ -264,11 +264,12 @@ export const AtualizarMedidasModal: React.FC<AtualizarMedidasModalProps> = ({ tr
       const server = await bluetoothDevice.gatt?.connect();
       
       if (!server) {
-        throw new Error('Não foi possível conectar');
+        throw new Error('Não foi possível conectar ao GATT Server');
       }
 
-      console.log('✅ GATT Server conectado');
+      console.log('✅ GATT Server conectado com sucesso');
 
+      // Event listener para desconexão
       bluetoothDevice.addEventListener('gattserverdisconnected', () => {
         console.log('⚠️ Balança desconectada');
         setIsConnected(false);
@@ -281,55 +282,92 @@ export const AtualizarMedidasModal: React.FC<AtualizarMedidasModalProps> = ({ tr
         });
       });
 
-      // Configurar listener para medição real com tratamento robusto
-      try {
-        console.log('🔍 Descobrindo serviços...');
-        const services = await server.getPrimaryServices();
-        console.log(`📡 Serviços encontrados: ${services.length}`);
+      // DESCOBERTA COMPLETA DE SERVIÇOS
+      console.log('🔍 Iniciando descoberta de serviços...');
+      const services = await server.getPrimaryServices();
+      console.log(`📡 ${services.length} serviços encontrados:`, services.map(s => s.uuid));
+      
+      let notificationsCount = 0;
+      
+      // Iterar por TODOS os serviços e características
+      for (let i = 0; i < services.length; i++) {
+        const service = services[i];
+        console.log(`\n🔧 === SERVIÇO ${i+1}/${services.length}: ${service.uuid} ===`);
         
-        let notificationSetup = false;
-        
-        for (const service of services) {
-          try {
-            console.log(`🔧 Analisando serviço: ${service.uuid}`);
-            const characteristics = await service.getCharacteristics();
+        try {
+          const characteristics = await service.getCharacteristics();
+          console.log(`📋 ${characteristics.length} características no serviço ${service.uuid}:`);
+          
+          for (let j = 0; j < characteristics.length; j++) {
+            const char = characteristics[j];
+            console.log(`   📌 Característica ${j+1}: ${char.uuid}`);
+            console.log(`      - Read: ${char.properties.read}`);
+            console.log(`      - Write: ${char.properties.write}`);
+            console.log(`      - Notify: ${char.properties.notify}`);
+            console.log(`      - Indicate: ${char.properties.indicate}`);
             
-            for (const characteristic of characteristics) {
-              console.log(`📋 Característica: ${characteristic.uuid}, Notify: ${characteristic.properties.notify}`);
-              
-              if (characteristic.properties.notify) {
-                await characteristic.startNotifications();
-                characteristic.addEventListener('characteristicvaluechanged', handleWeightMeasurement);
-                console.log(`✅ Notificações ativas: ${characteristic.uuid}`);
-                notificationSetup = true;
+            // CONFIGURAR NOTIFICAÇÕES EM TODAS AS CARACTERÍSTICAS POSSÍVEIS
+            if (char.properties.notify || char.properties.indicate) {
+              try {
+                console.log(`🔔 Configurando notificações para ${char.uuid}...`);
+                await char.startNotifications();
+                
+                // ADICIONAR LISTENER PARA ESTA CARACTERÍSTICA
+                char.addEventListener('characteristicvaluechanged', (event) => {
+                  console.log(`📡 DADOS de ${char.uuid}:`, event);
+                  handleWeightMeasurement(event);
+                });
+                
+                notificationsCount++;
+                console.log(`✅ Notificação ${notificationsCount} configurada: ${char.uuid}`);
+                
+              } catch (notifyError) {
+                console.warn(`⚠️ Erro ao configurar notificação para ${char.uuid}:`, notifyError);
               }
             }
-          } catch (serviceError) {
-            console.warn('⚠️ Erro em serviço específico:', serviceError);
+            
+            // TENTAR LER VALOR ATUAL SE POSSÍVEL
+            if (char.properties.read) {
+              try {
+                const value = await char.readValue();
+                console.log(`📖 Valor atual de ${char.uuid}:`, new Uint8Array(value.buffer));
+              } catch (readError) {
+                console.warn(`⚠️ Erro ao ler ${char.uuid}:`, readError);
+              }
+            }
           }
+          
+        } catch (serviceError) {
+          console.error(`❌ Erro no serviço ${service.uuid}:`, serviceError);
         }
-        
-        if (!notificationSetup) {
-          console.warn('⚠️ Nenhuma notificação configurada');
-        }
-        
-      } catch (discoveryError) {
-        console.error('❌ Erro na descoberta de serviços:', discoveryError);
+      }
+      
+      console.log(`\n🎉 DESCOBERTA FINALIZADA:`);
+      console.log(`   📡 ${services.length} serviços analisados`);
+      console.log(`   🔔 ${notificationsCount} notificações configuradas`);
+      
+      if (notificationsCount === 0) {
+        console.warn('⚠️ NENHUMA NOTIFICAÇÃO CONFIGURADA - Possível problema!');
+        toast({
+          title: "⚠️ Aviso",
+          description: "Nenhuma característica de notificação encontrada",
+          variant: "destructive",
+        });
       }
 
       setIsConnected(true);
       setDevice(bluetoothDevice);
       
       toast({
-        title: "✅ Balança Pareada!",
-        description: "Agora você pode iniciar a pesagem",
+        title: "✅ Balança Conectada!",
+        description: `${notificationsCount} canais de dados configurados`,
       });
 
     } catch (error) {
       console.error('❌ Erro na conexão:', error);
       toast({
         title: "Erro na conexão",
-        description: "Não foi possível conectar com a balança",
+        description: `Falha: ${error.message}`,
         variant: "destructive",
       });
     }
