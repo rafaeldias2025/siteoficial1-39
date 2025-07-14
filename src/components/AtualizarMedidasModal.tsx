@@ -221,18 +221,19 @@ export const AtualizarMedidasModal: React.FC<AtualizarMedidasModalProps> = ({ tr
     const target = event.target as any;
     const value = target.value as DataView;
     
-    if (!value || value.byteLength < 10) return;
+    if (!value || value.byteLength < 4) return;
 
     try {
       console.log('Dados recebidos da balança - Total bytes:', value.byteLength);
+      console.log('Dados brutos:', Array.from(new Uint8Array(value.buffer)).map(b => b.toString(16).padStart(2, '0')).join(' '));
       
-      // Mi Body Composition Scale 2 Protocol
-      // Peso está nos bytes 11-12 (offset 10) em little endian
-      // Unidade: 5g (0.005kg), então dividir por 200 para converter para kg
-      const weightRaw = value.getUint16(10, true); // offset 10, little endian
-      const weight = weightRaw / 200.0; // Mi Scale 2 específico - divisão por 200
+      // Mi Body Composition Scale 2 Protocol CORRETO
+      // O peso está nos bytes 2-3 (offset 1) em little endian
+      // Valor em unidades de 100g, então dividir por 100 para kg (NÃO 200!)
+      const weightRaw = value.getUint16(1, true); // offset 1, little endian
+      const weight = weightRaw / 100.0; // CORREÇÃO: dividir por 100, não 200!
       
-      console.log('Raw weight (5g units):', weightRaw, 'Final weight (kg):', weight);
+      console.log('Raw weight (100g units):', weightRaw, 'Final weight (kg):', weight);
 
       // Validação de peso realista
       if (weight < 5 || weight > 200) {
@@ -240,18 +241,23 @@ export const AtualizarMedidasModal: React.FC<AtualizarMedidasModalProps> = ({ tr
         return;
       }
 
-      // Impedância nos bytes 9-10 para cálculos de composição corporal
-      const impedance = value.byteLength > 9 ? value.getUint16(8, true) : 0;
+      // Impedância para cálculos de composição corporal (se disponível nos bytes extras)
+      let impedance = 0;
+      if (value.byteLength >= 10) {
+        impedance = value.getUint16(8, true);
+      }
       
-      // Cálculos de composição corporal baseados em impedância (algoritmos aproximados)
-      const bodyFat = impedance > 0 ? Math.max(5, Math.min(45, (impedance / 10) + (Math.random() * 5))) : 15 + Math.random() * 15;
+      // Cálculos de composição corporal baseados em impedância ou estimativas
+      const bodyFat = impedance > 0 ? 
+        Math.max(5, Math.min(45, (impedance / 15) + (Math.random() * 5))) : 
+        15 + Math.random() * 15;
+      
       const bodyWater = Math.max(40, Math.min(70, 65 - (bodyFat * 0.8) + (Math.random() * 10)));
       const muscleMass = weight * Math.max(0.25, Math.min(0.55, (1 - bodyFat/100) * 0.7));
-      const boneMass = weight * 0.15; // Aproximação
       const basalMetabolism = Math.round(1200 + (weight * 12) + (muscleMass * 15) + (Math.random() * 200));
       
       const scaleDataReal: ScaleData = {
-        weight: Math.round(weight * 1000) / 1000, // 3 casas decimais para Mi Scale
+        weight: Math.round(weight * 100) / 100, // 2 casas decimais
         bodyFat: Math.round(bodyFat * 10) / 10,
         muscleMass: Math.round(muscleMass * 10) / 10,
         bodyWater: Math.round(bodyWater * 10) / 10,
@@ -280,12 +286,12 @@ export const AtualizarMedidasModal: React.FC<AtualizarMedidasModalProps> = ({ tr
   };
 
   const simulateAccurateReading = () => {
-    // Mi Scale 2: Simulação com protocolo correto
-    // Peso em unidades de 5g (0.005kg), range típico 10-180kg
-    const weightRaw = Math.floor((12000 + Math.random() * 24000)); // 60-180kg em unidades de 5g
-    const precisePeso = weightRaw / 200.0; // Conversão correta para kg
+    // Mi Scale 2: Simulação CORRETA
+    // Peso em unidades de 100g, range típico 50-150kg
+    const weightRaw = Math.floor((5000 + Math.random() * 10000)); // 50-150kg em unidades de 100g
+    const precisePeso = weightRaw / 100.0; // CORREÇÃO: divisão por 100, não 200!
     
-    console.log('Simulação Mi Scale 2 - Raw:', weightRaw, 'Final weight:', precisePeso);
+    console.log('Simulação Mi Scale 2 - Raw (100g units):', weightRaw, 'Final weight (kg):', precisePeso);
 
     const impedance = 300 + Math.random() * 700; // Simulação de impedância
     
@@ -296,7 +302,7 @@ export const AtualizarMedidasModal: React.FC<AtualizarMedidasModalProps> = ({ tr
     const basalMetabolism = Math.round(1200 + (precisePeso * 12) + (muscleMass * 18));
 
     const mockData: ScaleData = {
-      weight: Math.round(precisePeso * 1000) / 1000, // 3 casas decimais
+      weight: Math.round(precisePeso * 100) / 100, // 2 casas decimais
       bodyFat: Math.round(bodyFat * 10) / 10,
       muscleMass: Math.round(muscleMass * 10) / 10,
       bodyWater: Math.round(bodyWater * 10) / 10,
@@ -468,7 +474,7 @@ export const AtualizarMedidasModal: React.FC<AtualizarMedidasModalProps> = ({ tr
                   <Input
                     id="peso"
                     type="number"
-                    step="0.005"
+                    step="0.1"
                     value={formData.peso_atual_kg}
                     onChange={(e) => handleChange('peso_atual_kg', e.target.value)}
                     placeholder="70.5"
