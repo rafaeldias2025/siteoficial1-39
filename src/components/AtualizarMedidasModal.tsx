@@ -77,7 +77,7 @@ export const AtualizarMedidasModal: React.FC<AtualizarMedidasModalProps> = ({ tr
       meta_peso_kg: dadosSaude?.meta_peso_kg || parseFloat(formData.peso_atual_kg.toString())
     };
 
-    // Se há dados da balança, salvar na tabela de pesagens para o usuário atual
+    // 🛠️ CORREÇÃO 3: Tratar erros do Supabase sem bloquear fluxo
     if (scaleData && user) {
       try {
         await supabase
@@ -94,17 +94,20 @@ export const AtualizarMedidasModal: React.FC<AtualizarMedidasModalProps> = ({ tr
             origem_medicao: 'balança_bluetooth_usuario'
           });
 
+        console.log('✅ Dados salvos no Supabase com sucesso');
         toast({
           title: "✅ Dados salvos!",
           description: `Pesagem registrada com sucesso`,
         });
-      } catch (error) {
-        console.error('Erro ao salvar dados da balança:', error);
+      } catch (supabaseError) {
+        // ERRO NO SUPABASE NÃO BLOQUEIA O FLUXO
+        console.error('❌ Erro ao salvar no Supabase:', supabaseError);
         toast({
-          title: "Erro ao salvar",
-          description: "Não foi possível salvar os dados da balança",
-          variant: "destructive",
+          title: "⚠️ Dados coletados",
+          description: "Pesagem capturada (erro ao salvar no banco)",
+          variant: "default", // Não usar "destructive" para não alarmar
         });
+        // CONTINUA o fluxo normalmente mesmo com erro no Supabase
       }
     }
 
@@ -377,10 +380,15 @@ export const AtualizarMedidasModal: React.FC<AtualizarMedidasModalProps> = ({ tr
     try {
       const target = event.target as any;
       const value = target.value as DataView;
-      const characteristicUuid = target.characteristic?.uuid || 'unknown';
       
-      if (!value || value.byteLength === 0) {
-        console.log('❌ Dados vazios recebidos');
+      // 🛠️ CORREÇÃO 2: Validação robusta de dados BLE
+      if (!value || value === null || value === undefined) {
+        console.log('❌ Valor nulo ou indefinido recebido');
+        return;
+      }
+      
+      if (value.byteLength < 10) {
+        console.log(`❌ Dados insuficientes: ${value.byteLength} bytes (mínimo 10)`);
         return;
       }
 
@@ -388,66 +396,66 @@ export const AtualizarMedidasModal: React.FC<AtualizarMedidasModalProps> = ({ tr
       const bytes = Array.from(new Uint8Array(value.buffer));
       const hexString = bytes.map(b => b.toString(16).padStart(2, '0')).join(' ');
       
-      console.log('🎯 DADOS COMPLETOS RECEBIDOS:');
+      console.log('🎯 DADOS Mi Scale 2:');
       console.log('📊 BYTES:', bytes);
       console.log('🔤 HEX:', hexString);
-      console.log('🔢 DECIMAL:', bytes.join(', '));
       console.log('⚖️ Estado pesando:', isWeighing);
 
-      let weight = 0;
-      let isValidWeight = false;
-
-      // ANÁLISE COMPLETA DE DADOS - PROTOCOLO Mi Scale 2
       try {
         if (value.byteLength >= 13) {
           
-          // Byte 0: Flags de controle  
+          // Byte 0: Flags de controle e estabilização
           const controlByte = value.getUint8(0);
           console.log(`🏁 Control Byte: 0x${controlByte.toString(16)} (${controlByte})`);
           
-          // Peso principal - Bytes 2-3 (little endian) - CORREÇÃO ESPECÍFICA Mi Scale 2
-          const weightRaw = value.getUint16(2, true);
-          weight = weightRaw / 100.0; // Divisão por 100.0 conforme protocolo correto
+          // 🛠️ CORREÇÃO 1: Verificar bit de estabilização antes de processar
+          const isStabilized = (controlByte & 0x20) === 0x20; // Bit 5: peso estabilizado
+          const isWeightRemoved = (controlByte & 0x80) === 0x80; // Bit 7: peso removido
           
-          console.log(`⚖️ Peso RAW: ${weightRaw} → ${weight.toFixed(2)}kg`);
+          console.log(`📊 Estabilizado: ${isStabilized}, Removido: ${isWeightRemoved}`);
           
-          // TENTAR OUTRAS INTERPRETAÇÕES TAMBÉM
-          const weightAlt1 = weightRaw / 200;
-          const weightAlt2 = value.getUint16(1, true) / 100.0; // Bytes 1-2 como alternativa
-          const weightBE = value.getUint16(2, false) / 100.0;
-          
-          console.log(`🔄 Alternativas: ÷200=${weightAlt1.toFixed(2)}kg, bytes1-2=${weightAlt2.toFixed(2)}kg, BE=${weightBE.toFixed(2)}kg`);
-          
-          // Validar peso principal primeiro
-          if (weight >= 20 && weight <= 200) {
-            isValidWeight = true;
-            console.log(`✅ PESO PRINCIPAL VÁLIDO: ${weight.toFixed(2)}kg (bytes 2-3 ÷100.0)`);
-          } else {
-            // Tentar alternativas se peso principal não for válido
-            const possibleWeights = [weightAlt1, weightAlt2, weightBE];
-            for (const w of possibleWeights) {
-              if (w >= 20 && w <= 200) {
-                weight = w;
-                isValidWeight = true;
-                console.log(`✅ PESO ALTERNATIVO VÁLIDO: ${weight.toFixed(2)}kg`);
-                break;
-              }
+          // Se peso foi removido, limpar dados
+          if (isWeightRemoved) {
+            console.log('🚫 Peso removido da balança');
+            if (isWeighing) {
+              toast({
+                title: "👤 Saia da balança",
+                description: "Peso removido detectado",
+                duration: 2000,
+              });
             }
-          }
-          
-          if (!isValidWeight) {
-            console.log('❌ Nenhum peso válido nas interpretações');
             return;
           }
           
-        } else {
-          console.log('⚠️ Dados insuficientes (menos que 13 bytes)');
-          return;
-        }
-
-        // SEMPRE PROCESSAR PESO VÁLIDO - INDEPENDENTE DO ESTADO
-        if (isValidWeight) {
-          console.log(`🎉 PESO DETECTADO: ${weight.toFixed(2)}kg`);
+          // AGUARDAR ESTABILIZAÇÃO - só processar se estiver estabilizado
+          if (!isStabilized) {
+            console.log('⏳ Aguardando estabilização do peso...');
+            if (isWeighing) {
+              toast({
+                title: "⏳ Estabilizando...",
+                description: "Mantenha-se parado na balança",
+                duration: 1000,
+              });
+            }
+            return;
+          }
+          
+          console.log('✅ PESO ESTABILIZADO - Processando dados...');
+          
+          // 🛠️ CORREÇÃO 5: Peso corrigido - Bytes 2-3 com divisão por 100.0
+          const weightRaw = value.getUint16(2, true);
+          const weight = weightRaw / 100.0;
+          
+          console.log(`⚖️ Peso RAW: ${weightRaw} → ${weight.toFixed(2)}kg`);
+          
+          // Validação de peso realista
+          if (weight < 5 || weight > 300 || isNaN(weight)) {
+            console.log(`❌ Peso inválido: ${weight}kg`);
+            return;
+          }
+          
+          // SEMPRE MOSTRAR PESO DETECTADO para feedback
+          console.log(`🎉 PESO VÁLIDO DETECTADO: ${weight.toFixed(2)}kg`);
           
           // Se estiver pesando, adicionar às leituras
           if (isWeighing) {
@@ -463,26 +471,30 @@ export const AtualizarMedidasModal: React.FC<AtualizarMedidasModalProps> = ({ tr
             
             toast({
               title: `⚖️ ${weight.toFixed(1)}kg capturado`,
-              description: `${newReadings.length} leituras coletadas`,
-              duration: 1000,
+              description: `${newReadings.length} leituras estabilizadas`,
+              duration: 1500,
             });
           } else {
-            // Mostrar peso mesmo fora da pesagem para debug
-            console.log(`📊 PESO FORA DE PESAGEM: ${weight.toFixed(2)}kg`);
+            // Mostrar peso detectado mesmo fora da pesagem
             toast({
-              title: `📊 Peso detectado: ${weight.toFixed(1)}kg`,
-              description: "Inicie a pesagem para capturar",
+              title: `📊 ${weight.toFixed(1)}kg detectado`,
+              description: "Inicie a pesagem para registrar",
               duration: 2000,
             });
           }
+          
+        } else {
+          console.log('⚠️ Dados insuficientes para protocolo Mi Scale 2');
         }
 
       } catch (parseError) {
-        console.error('❌ Erro ao interpretar dados:', parseError);
+        console.error('❌ Erro ao interpretar dados BLE:', parseError);
+        // Não bloquear fluxo, apenas logar
       }
 
     } catch (error) {
-      console.error('❌ ERRO CRÍTICO em handleWeightMeasurement:', error);
+      console.error('❌ ERRO em handleWeightMeasurement:', error);
+      // 🛠️ CORREÇÃO 3: Não bloquear fluxo em caso de erro
     }
   };
 
@@ -584,26 +596,41 @@ export const AtualizarMedidasModal: React.FC<AtualizarMedidasModalProps> = ({ tr
                   }`} />
                 </div>
 
-                {/* Botões de Ação */}
-                {!isConnected ? (
-                  <Button 
-                    onClick={startPairing}
-                    disabled={isPairing || !user}
-                    className="w-full bg-instituto-purple hover:bg-instituto-purple/80"
-                    size="lg"
-                  >
-                    {isPairing ? (
-                      <>
-                        <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2" />
-                        Pareando balança...
-                      </>
-                    ) : (
-                      <>
-                        <Bluetooth className="h-4 w-4 mr-2" />
-                        🔗 Parear Mi Scale 2
-                      </>
-                    )}
-                  </Button>
+                 {/* 🛠️ CORREÇÃO 4: Instruções para o usuário */}
+                 {!isConnected && (
+                   <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg mb-4">
+                     <h4 className="font-semibold text-blue-800 mb-2">📋 Instruções para Pesagem</h4>
+                     <ol className="text-sm text-blue-700 space-y-1">
+                       <li><span className="font-medium">1.</span> Certifique-se que a balança está ligada</li>
+                       <li><span className="font-medium">2.</span> Coloque a balança em superfície plana e rígida</li>
+                       <li><span className="font-medium">3.</span> <strong>SUBA na balança ANTES de parear</strong> para ativá-la</li>
+                       <li><span className="font-medium">4.</span> Clique em "Parear Mi Scale 2" e selecione "MIBFS"</li>
+                       <li><span className="font-medium">5.</span> Após parear, clique em "Iniciar Pesagem"</li>
+                       <li><span className="font-medium">6.</span> Suba na balança e mantenha-se parado até estabilizar</li>
+                     </ol>
+                   </div>
+                 )}
+
+                 {/* Botões de Ação */}
+                 {!isConnected ? (
+                   <Button 
+                     onClick={startPairing}
+                     disabled={isPairing || !user}
+                     className="w-full bg-instituto-purple hover:bg-instituto-purple/80"
+                     size="lg"
+                   >
+                     {isPairing ? (
+                       <>
+                         <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2" />
+                         Pareando balança...
+                       </>
+                     ) : (
+                       <>
+                         <Bluetooth className="h-4 w-4 mr-2" />
+                         🔗 Parear Mi Scale 2
+                       </>
+                     )}
+                   </Button>
                 ) : (
                   <div className="space-y-3">
                     {!isWeighing ? (
