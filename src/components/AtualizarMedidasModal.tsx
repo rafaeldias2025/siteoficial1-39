@@ -233,7 +233,7 @@ export const AtualizarMedidasModal: React.FC<AtualizarMedidasModalProps> = ({ tr
       }
 
       setIsConnected(true);
-      setCountdown(30);
+      setCountdown(10);
       setIsWaitingStabilization(false);
       setLastReadings([]);
       
@@ -242,8 +242,8 @@ export const AtualizarMedidasModal: React.FC<AtualizarMedidasModalProps> = ({ tr
         description: "Suba na balança e aguarde a estabilização do peso",
       });
 
-      // Timer estendido para aguardar estabilização real
-      let timeLeft = 30;
+      // Timer de 10 segundos para aguardar estabilização
+      let timeLeft = 10;
       const timer = setInterval(() => {
         timeLeft--;
         setCountdown(timeLeft);
@@ -543,7 +543,7 @@ export const AtualizarMedidasModal: React.FC<AtualizarMedidasModalProps> = ({ tr
                           <p className="text-sm text-muted-foreground">
                             {isWaitingStabilization 
                               ? "⏳ Aguardando peso estabilizar..."
-                              : countdown > 20 
+                              : countdown > 5 
                                 ? "🔵 Suba na balança agora"
                                 : "⚖️ Mantenha-se na balança até estabilizar"
                             }
