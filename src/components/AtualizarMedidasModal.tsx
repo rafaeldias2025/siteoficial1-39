@@ -374,7 +374,6 @@ export const AtualizarMedidasModal: React.FC<AtualizarMedidasModalProps> = ({ tr
   };
 
   const handleWeightMeasurement = (event: Event) => {
-    // CAPTURA ULTRA AGRESSIVA - registrar TUDO que chega
     const target = event.target as any;
     const value = target.value as DataView;
     
@@ -387,7 +386,7 @@ export const AtualizarMedidasModal: React.FC<AtualizarMedidasModalProps> = ({ tr
 
     console.log('📦 DADOS BRUTOS:', {
       byteLength: value.byteLength,
-      buffer: value.buffer,
+      characteristic: target.characteristic?.uuid,
       isWeighing: isWeighing
     });
 
@@ -400,73 +399,82 @@ export const AtualizarMedidasModal: React.FC<AtualizarMedidasModalProps> = ({ tr
       
       console.log('🔢 TODOS OS BYTES:', allBytes);
       console.log('🔤 HEX:', allBytes.map(b => b.toString(16).padStart(2, '0')).join(' '));
-      console.log('📊 DECIMAL:', allBytes.join(', '));
       
-      // TENTAR EXTRAIR PESO DE TODAS AS FORMAS POSSÍVEIS
-      const possibleWeights = [];
-      
-      // Se tem pelo menos 2 bytes, tentar interpretações
-      if (value.byteLength >= 2) {
-        // Tentativa 1: Bytes 0-1, little endian
-        try {
-          const w1 = value.getUint16(0, true);
-          possibleWeights.push({ method: 'bytes_0-1_LE', raw: w1, div200: w1/200, div100: w1/100, div1000: w1/1000 });
-        } catch (e) { console.log('Erro tentativa 1:', e); }
+      // PROTOCOLO MI SCALE 2 CORRETO - Baseado na característica 0x2A9C (Body Weight Measurement)
+      if (value.byteLength >= 13 && target.characteristic?.uuid === '00002a9c-0000-1000-8000-00805f9b34fb') {
+        console.log('✅ PROTOCOLO MI SCALE 2 DETECTADO (0x2A9C)');
         
-        // Tentativa 2: Bytes 0-1, big endian
-        try {
-          const w2 = value.getUint16(0, false);
-          possibleWeights.push({ method: 'bytes_0-1_BE', raw: w2, div200: w2/200, div100: w2/100, div1000: w2/1000 });
-        } catch (e) { console.log('Erro tentativa 2:', e); }
-      }
-      
-      // Se tem pelo menos 3 bytes
-      if (value.byteLength >= 3) {
-        // Tentativa 3: Bytes 1-2, little endian (protocolo Mi Scale)
-        try {
-          const w3 = value.getUint16(1, true);
-          possibleWeights.push({ method: 'bytes_1-2_LE', raw: w3, div200: w3/200, div100: w3/100, div1000: w3/1000 });
-        } catch (e) { console.log('Erro tentativa 3:', e); }
+        // Byte 0: Flags
+        const flags = value.getUint8(0);
+        const isLbs = (flags & 0x01) === 0x01; // Bit 0: unidade (0=kg, 1=lbs)
+        const hasTimestamp = (flags & 0x02) === 0x02; // Bit 1: timestamp presente
+        const hasUserId = (flags & 0x04) === 0x04; // Bit 2: user ID presente
+        const hasBMI = (flags & 0x08) === 0x08; // Bit 3: BMI e altura presentes
         
-        // Tentativa 4: Bytes 1-2, big endian
-        try {
-          const w4 = value.getUint16(1, false);
-          possibleWeights.push({ method: 'bytes_1-2_BE', raw: w4, div200: w4/200, div100: w4/100, div1000: w4/1000 });
-        } catch (e) { console.log('Erro tentativa 4:', e); }
-      }
-      
-      console.log('🎯 POSSÍVEIS PESOS:', possibleWeights);
-      
-      // Encontrar peso mais provável (10-300kg)
-      let bestWeight = null;
-      for (const attempt of possibleWeights) {
-        const weights = [attempt.div200, attempt.div100, attempt.div1000];
-        for (const w of weights) {
-          if (w >= 10 && w <= 300) {
-            bestWeight = { weight: w, method: attempt.method, raw: attempt.raw };
-            console.log(`✅ PESO DETECTADO: ${w.toFixed(2)}kg (${attempt.method}, raw: ${attempt.raw})`);
-            break;
+        console.log(`🏳️ FLAGS: 0x${flags.toString(16)} - Unidade: ${isLbs ? 'lbs' : 'kg'}, Timestamp: ${hasTimestamp}, User: ${hasUserId}, BMI: ${hasBMI}`);
+        
+        // Bytes 1-2: Peso (little endian)
+        const weightRaw = value.getUint16(1, true);
+        let weight = weightRaw / 200; // Mi Scale usa divisão por 200 para kg
+        
+        if (isLbs) {
+          weight = weightRaw / 100; // Para libras, divisão por 100
+          weight = weight * 0.453592; // Converter libras para kg
+        }
+        
+        console.log(`📊 PESO RAW: ${weightRaw}, PESO FINAL: ${weight.toFixed(2)}kg`);
+        
+        // Verificar se é um peso válido (não zero, não muito pequeno/grande)
+        if (weight < 5 || weight > 300) {
+          console.log('❌ Peso fora do range válido:', weight);
+          return;
+        }
+        
+        // Extrair dados adicionais se presentes
+        let bodyFat = 0;
+        let muscleMass = 0;
+        let bodyWater = 0;
+        let boneMass = 0;
+        let metabolicAge = 0;
+        let impedance = 0;
+        
+        // Se há dados de composição corporal (bytes 9-12)
+        if (value.byteLength >= 13) {
+          impedance = value.getUint16(9, true);
+          if (impedance > 0) {
+            // Calcular composição corporal baseada na impedância real
+            bodyFat = Math.max(5, Math.min(50, 15 + (impedance / 150)));
+            bodyWater = Math.max(30, Math.min(70, 55 - (impedance / 300)));
+            muscleMass = weight * (0.4 + ((70 - bodyFat) / 100));
+            boneMass = weight * 0.15;
+            metabolicAge = Math.max(18, Math.min(80, 25 + (bodyFat - 15)));
+            
+            console.log(`⚡ IMPEDÂNCIA: ${impedance}Ω`);
+            console.log(`📊 COMPOSIÇÃO: Gordura: ${bodyFat.toFixed(1)}%, Água: ${bodyWater.toFixed(1)}%, Músculo: ${muscleMass.toFixed(1)}kg`);
           }
         }
-        if (bestWeight) break;
-      }
-      
-      if (bestWeight) {
-        // Adicionar à lista de leituras
-        const newReadings = [...lastReadings, { weight: bestWeight.weight, timestamp: Date.now() }];
-        setLastReadings(newReadings);
-        console.log(`📊 LEITURA ADICIONADA! Total: ${newReadings.length}`);
         
-        // Mostrar peso em tempo real no toast se estiver pesando
+        // Adicionar à lista de leituras APENAS se estiver pesando
         if (isWeighing) {
+          const newReadings = [...lastReadings, { weight, timestamp: Date.now() }];
+          setLastReadings(newReadings);
+          
+          console.log(`📊 LEITURA ADICIONADA! Peso: ${weight.toFixed(2)}kg, Total leituras: ${newReadings.length}`);
+          
+          // Feedback visual em tempo real
           toast({
-            title: `⚖️ Peso: ${bestWeight.weight.toFixed(1)}kg`,
-            description: `Método: ${bestWeight.method} | Leituras: ${newReadings.length}`,
+            title: `⚖️ ${weight.toFixed(1)}kg`,
+            description: `Leitura ${newReadings.length} - Impedância: ${impedance}Ω`,
             duration: 1000,
           });
+        } else {
+          console.log(`📊 PESO DETECTADO MAS NÃO PESANDO: ${weight.toFixed(2)}kg`);
         }
+        
       } else {
-        console.log('❌ NENHUM PESO VÁLIDO ENCONTRADO NOS DADOS');
+        console.log('⚠️ Característica desconhecida ou tamanho inadequado');
+        console.log(`   UUID: ${target.characteristic?.uuid}`);
+        console.log(`   Bytes: ${value.byteLength}`);
       }
       
     } catch (error) {
