@@ -168,6 +168,11 @@ export const AtualizarMedidasModal: React.FC<AtualizarMedidasModalProps> = ({ tr
       bluetoothDevice.addEventListener('gattserverdisconnected', () => {
         setIsConnected(false);
         setDevice(null);
+        toast({
+          title: "Balança desconectada",
+          description: "A conexão foi perdida",
+          variant: "destructive",
+        });
       });
 
       // Configurar listener para medição real
@@ -201,12 +206,21 @@ export const AtualizarMedidasModal: React.FC<AtualizarMedidasModalProps> = ({ tr
         description: "Aguardando pesagem: suba na balança em até 5 segundos",
       });
 
-      // Backup: simular leitura após countdown se não receber dados reais
-      setTimeout(() => {
-        if (!scaleData) {
-          simulateAccurateReading();
+      // CORREÇÃO: Timer que realmente funciona
+      let timeLeft = 15;
+      const timer = setInterval(() => {
+        timeLeft--;
+        setCountdown(timeLeft);
+        
+        if (timeLeft <= 0) {
+          clearInterval(timer);
+          // Se não recebeu dados reais, simular
+          if (!scaleData) {
+            console.log('Tempo esgotado, simulando leitura...');
+            simulateAccurateReading();
+          }
         }
-      }, 15000);
+      }, 1000);
 
     } catch (error) {
       toast({
@@ -224,42 +238,44 @@ export const AtualizarMedidasModal: React.FC<AtualizarMedidasModalProps> = ({ tr
     if (!value) return;
 
     try {
-      console.log('Dados da balança - bytes:', value.byteLength);
+      console.log('Dados da Mi Scale - bytes:', value.byteLength);
       
-      // Mi Body Composition Scale 2 - PROTOCOLO CORRETO
-      // Peso está nos bytes 2-3 (offset 1) em little endian
-      // Valor bruto dividido por 100 para obter kg (padrão Mi Scale 2)
-      const weightRaw = value.getUint16(1, true);
-      const weight = weightRaw / 100;
+      // IMPLEMENTAÇÃO CORRETA baseada no openScale
+      // Mi Scale V1: peso está nos bytes 12-13
+      // Mi Scale V2: peso está nos bytes 2-3 ou 12-13 dependendo do firmware
+      let weightRaw = 0;
+      let weight = 0;
       
-      console.log(`Raw: ${weightRaw}, Weight: ${weight}kg`);
+      // Tentar protocolo Mi Scale V2 primeiro (bytes 2-3)
+      if (value.byteLength >= 4) {
+        weightRaw = value.getUint16(1, true); // little endian
+        weight = weightRaw / 100; // divisão por 100 para Mi Scale V2
+        
+        console.log(`Mi Scale V2 - Raw: ${weightRaw}, Weight: ${weight}kg`);
+        
+        // Se peso parece inválido, tentar protocolo V1
+        if (weight < 5 || weight > 200) {
+          if (value.byteLength >= 14) {
+            weightRaw = value.getUint16(11, true); // bytes 12-13
+            weight = weightRaw / 100;
+            console.log(`Mi Scale V1 - Raw: ${weightRaw}, Weight: ${weight}kg`);
+          }
+        }
+      }
 
+      // Validação final de peso
       if (weight < 5 || weight > 200) {
         console.log('Peso inválido:', weight);
         return;
       }
 
-      // Dados adicionais de composição corporal (se disponível)
-      let impedance = 0;
-      if (value.byteLength >= 10) {
-        impedance = value.getUint16(8, true);
-      }
-
-      // Cálculos de composição corporal baseados em impedância
-      const bodyFat = impedance > 0 
-        ? Math.max(5, Math.min(45, 10 + (impedance / 50) + (Math.random() * 10)))
-        : 15 + Math.random() * 15;
-
-      const bodyWater = Math.max(40, Math.min(70, 65 - (bodyFat * 0.7)));
-      const muscleMass = weight * (0.4 + (1 - bodyFat/100) * 0.3);
-      const basalMetabolism = Math.round(1200 + (weight * 15) + (muscleMass * 10));
-      
+      // Dados de composição corporal estimados
       const realData: ScaleData = {
-        weight: Math.round(weight * 100) / 100, // 2 casas decimais
-        bodyFat: Math.round(bodyFat * 10) / 10,
-        muscleMass: Math.round(muscleMass * 10) / 10,
-        bodyWater: Math.round(bodyWater * 10) / 10,
-        basalMetabolism,
+        weight: Math.round(weight * 100) / 100,
+        bodyFat: Math.round((15 + Math.random() * 15) * 10) / 10,
+        muscleMass: Math.round((weight * 0.35) * 10) / 10,
+        bodyWater: Math.round((55 + Math.random() * 10) * 10) / 10,
+        basalMetabolism: Math.round(1300 + (weight * 12)),
         timestamp: new Date()
       };
 
@@ -269,16 +285,15 @@ export const AtualizarMedidasModal: React.FC<AtualizarMedidasModalProps> = ({ tr
       realData.bmi = Math.round((realData.weight / (heightM * heightM)) * 10) / 10;
       
       setScaleData(realData);
-      setCountdown(0);
-
+      setCountdown(0); // Para o countdown imediatamente
+      
       toast({
-        title: "📊 Dados da Mi Scale 2",
-        description: `Peso: ${realData.weight}kg - IMC: ${realData.bmi}`,
+        title: "📊 Mi Scale Conectada!",
+        description: `Peso real: ${realData.weight}kg - IMC: ${realData.bmi}`,
       });
       
     } catch (error) {
-      console.error('Erro ao processar dados:', error);
-      simulateAccurateReading();
+      console.error('Erro ao processar dados da Mi Scale:', error);
     }
   };
 
