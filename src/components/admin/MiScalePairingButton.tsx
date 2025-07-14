@@ -44,31 +44,14 @@ export const MiScalePairingButton: React.FC<MiScalePairingButtonProps> = ({
         description: "Certifique-se de que sua balança está ligada e próxima.",
       });
 
-      // Configuração específica para Mi Body Composition Scale 2
+      // Configuração mais ampla para detectar diferentes modelos de balanças
       const device = await (navigator as any).bluetooth.requestDevice({
-        filters: [
-          { 
-            namePrefix: 'MIBCS',
-            services: ['0000181d-0000-1000-8000-00805f9b34fb'] // Weight Scale Service
-          },
-          { 
-            namePrefix: 'Mi Body Composition Scale',
-            services: ['0000181d-0000-1000-8000-00805f9b34fb']
-          },
-          {
-            namePrefix: 'Mi Scale',
-            services: ['0000181d-0000-1000-8000-00805f9b34fb']
-          },
-          {
-            // Fallback para outras variantes da Mi Scale
-            services: ['0000181d-0000-1000-8000-00805f9b34fb']
-          }
-        ],
+        acceptAllDevices: true,
         optionalServices: [
-          '0000180f-0000-1000-8000-00805f9b34fb', // Battery Service
           '0000181d-0000-1000-8000-00805f9b34fb', // Weight Scale Service
-          '00001530-1212-efde-1523-785feabcd123', // Mi Fitness Service (específico Xiaomi)
+          '0000180f-0000-1000-8000-00805f9b34fb', // Battery Service
           '0000181b-0000-1000-8000-00805f9b34fb', // Body Composition Service
+          '00001530-1212-efde-1523-785feabcd123', // Mi Fitness Service
           'a22116c4-b1b4-4e40-8c71-c1e3e5b0b2b3', // Custom Mi Scale Service
         ]
       });
@@ -123,8 +106,12 @@ export const MiScalePairingButton: React.FC<MiScalePairingButtonProps> = ({
         throw new Error('Não foi possível conectar ao servidor GATT');
       }
 
+      console.log('Conectado ao GATT server:', device.name);
+      console.log('Device ID:', device.id);
+
       // Configurar listeners para desconexão
       device.addEventListener('gattserverdisconnected', () => {
+        console.log('Dispositivo desconectado');
         toast({
           title: "Balança desconectada",
           description: "A conexão com a balança foi perdida.",
@@ -132,6 +119,24 @@ export const MiScalePairingButton: React.FC<MiScalePairingButtonProps> = ({
         });
         setFoundDevice(null);
       });
+
+      // Tentar descobrir serviços disponíveis
+      try {
+        const services = await server.getPrimaryServices();
+        console.log('Serviços encontrados:', services.map(s => s.uuid));
+        
+        // Procurar pelo serviço de peso
+        for (const service of services) {
+          try {
+            const characteristics = await service.getCharacteristics();
+            console.log(`Serviço ${service.uuid} tem características:`, characteristics.map(c => c.uuid));
+          } catch (err) {
+            console.log(`Erro ao ler características do serviço ${service.uuid}:`, err);
+          }
+        }
+      } catch (err) {
+        console.log('Erro ao descobrir serviços:', err);
+      }
 
       onConnected?.(device);
       
