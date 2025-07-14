@@ -374,111 +374,103 @@ export const AtualizarMedidasModal: React.FC<AtualizarMedidasModalProps> = ({ tr
   };
 
   const handleWeightMeasurement = (event: Event) => {
-    const target = event.target as any;
-    const value = target.value as DataView;
-    
-    console.log('🔥 EVENTO RECEBIDO DA BALANÇA!');
-    
-    if (!value) {
-      console.log('❌ Valor vazio recebido');
-      return;
-    }
-
-    console.log('📦 DADOS BRUTOS:', {
-      byteLength: value.byteLength,
-      characteristic: target.characteristic?.uuid,
-      isWeighing: isWeighing
-    });
-
     try {
-      // Mostrar TODOS os bytes recebidos
-      const allBytes = [];
-      for (let i = 0; i < value.byteLength; i++) {
-        allBytes.push(value.getUint8(i));
+      const target = event.target as any;
+      const value = target.value as DataView;
+      const characteristicUuid = target.characteristic?.uuid || 'unknown';
+      
+      console.log('🎯 DADOS RECEBIDOS:', {
+        uuid: characteristicUuid,
+        bytes: value?.byteLength || 0,
+        pesando: isWeighing
+      });
+      
+      if (!value || value.byteLength === 0) {
+        console.log('❌ Dados vazios recebidos');
+        return;
       }
+
+      // Extrair todos os bytes para análise
+      const bytes = Array.from(new Uint8Array(value.buffer));
+      const hexString = bytes.map(b => b.toString(16).padStart(2, '0')).join(' ');
       
-      console.log('🔢 TODOS OS BYTES:', allBytes);
-      console.log('🔤 HEX:', allBytes.map(b => b.toString(16).padStart(2, '0')).join(' '));
-      
-      // PROTOCOLO MI SCALE 2 CORRETO - Baseado na característica 0x2A9C (Body Weight Measurement)
-      if (value.byteLength >= 13 && target.characteristic?.uuid === '00002a9c-0000-1000-8000-00805f9b34fb') {
-        console.log('✅ PROTOCOLO MI SCALE 2 DETECTADO (0x2A9C)');
-        
-        // Byte 0: Flags
-        const flags = value.getUint8(0);
-        const isLbs = (flags & 0x01) === 0x01; // Bit 0: unidade (0=kg, 1=lbs)
-        const hasTimestamp = (flags & 0x02) === 0x02; // Bit 1: timestamp presente
-        const hasUserId = (flags & 0x04) === 0x04; // Bit 2: user ID presente
-        const hasBMI = (flags & 0x08) === 0x08; // Bit 3: BMI e altura presentes
-        
-        console.log(`🏳️ FLAGS: 0x${flags.toString(16)} - Unidade: ${isLbs ? 'lbs' : 'kg'}, Timestamp: ${hasTimestamp}, User: ${hasUserId}, BMI: ${hasBMI}`);
-        
-        // Bytes 1-2: Peso (little endian)
-        const weightRaw = value.getUint16(1, true);
-        let weight = weightRaw / 200; // Mi Scale usa divisão por 200 para kg
-        
-        if (isLbs) {
-          weight = weightRaw / 100; // Para libras, divisão por 100
-          weight = weight * 0.453592; // Converter libras para kg
+      console.log('📊 BYTES:', bytes);
+      console.log('🔤 HEX:', hexString);
+
+      let weight = 0;
+      let isStable = false;
+      let impedance = 0;
+
+      // PROTOCOLO SIMPLES E ROBUSTO - BASEADO EM PROJETOS REAIS
+      try {
+        if (value.byteLength >= 13) {
+          // Mi Scale 2 padrão - Protocolo mais comum
+          
+          // Byte 0: Flags de controle  
+          const controlByte = value.getUint8(0);
+          console.log(`🏁 Control Byte: 0x${controlByte.toString(16)}`);
+          
+          // Verificar se peso está estável (bit específico varia por modelo)
+          isStable = (controlByte & 0x20) !== 0 || (controlByte & 0x80) !== 0;
+          
+          // Peso principal - Bytes 1-2 (little endian)
+          const weightRaw = value.getUint16(1, true);
+          weight = weightRaw / 200; // Padrão Mi Scale
+          
+          console.log(`⚖️ Peso RAW: ${weightRaw}, Convertido: ${weight.toFixed(2)}kg, Estável: ${isStable}`);
+          
+          // Impedância - Bytes 9-10 ou 11-12 dependendo do modelo
+          if (value.byteLength >= 13) {
+            impedance = value.getUint16(9, true) || value.getUint16(11, true) || 0;
+            console.log(`⚡ Impedância: ${impedance}Ω`);
+          }
+          
+        } else if (value.byteLength >= 3) {
+          // Protocolo alternativo para outros modelos
+          const weightRaw = value.getUint16(1, true);
+          weight = weightRaw / 200;
+          isStable = true; // Assume estável para protocolos menores
+          
+          console.log(`⚖️ Protocolo alternativo - Peso: ${weight.toFixed(2)}kg`);
         }
-        
-        console.log(`📊 PESO RAW: ${weightRaw}, PESO FINAL: ${weight.toFixed(2)}kg`);
-        
-        // Verificar se é um peso válido (não zero, não muito pequeno/grande)
-        if (weight < 5 || weight > 300) {
-          console.log('❌ Peso fora do range válido:', weight);
+
+        // VALIDAÇÃO ROBUSTA
+        if (weight < 5 || weight > 300 || isNaN(weight)) {
+          console.log(`❌ Peso inválido: ${weight}kg`);
           return;
         }
-        
-        // Extrair dados adicionais se presentes
-        let bodyFat = 0;
-        let muscleMass = 0;
-        let bodyWater = 0;
-        let boneMass = 0;
-        let metabolicAge = 0;
-        let impedance = 0;
-        
-        // Se há dados de composição corporal (bytes 9-12)
-        if (value.byteLength >= 13) {
-          impedance = value.getUint16(9, true);
-          if (impedance > 0) {
-            // Calcular composição corporal baseada na impedância real
-            bodyFat = Math.max(5, Math.min(50, 15 + (impedance / 150)));
-            bodyWater = Math.max(30, Math.min(70, 55 - (impedance / 300)));
-            muscleMass = weight * (0.4 + ((70 - bodyFat) / 100));
-            boneMass = weight * 0.15;
-            metabolicAge = Math.max(18, Math.min(80, 25 + (bodyFat - 15)));
-            
-            console.log(`⚡ IMPEDÂNCIA: ${impedance}Ω`);
-            console.log(`📊 COMPOSIÇÃO: Gordura: ${bodyFat.toFixed(1)}%, Água: ${bodyWater.toFixed(1)}%, Músculo: ${muscleMass.toFixed(1)}kg`);
-          }
-        }
-        
-        // Adicionar à lista de leituras APENAS se estiver pesando
+
+        // ADICIONAR LEITURA APENAS SE ESTIVER PESANDO
         if (isWeighing) {
-          const newReadings = [...lastReadings, { weight, timestamp: Date.now() }];
+          const reading = { 
+            weight: Number(weight.toFixed(2)), 
+            timestamp: Date.now(),
+            stable: isStable,
+            impedance: impedance
+          };
+          
+          const newReadings = [...lastReadings, reading];
           setLastReadings(newReadings);
           
-          console.log(`📊 LEITURA ADICIONADA! Peso: ${weight.toFixed(2)}kg, Total leituras: ${newReadings.length}`);
+          console.log(`✅ LEITURA ADICIONADA: ${weight.toFixed(2)}kg (${newReadings.length} total)`);
           
-          // Feedback visual em tempo real
+          // Toast em tempo real
           toast({
-            title: `⚖️ ${weight.toFixed(1)}kg`,
-            description: `Leitura ${newReadings.length} - Impedância: ${impedance}Ω`,
-            duration: 1000,
+            title: `⚖️ ${weight.toFixed(1)}kg ${isStable ? '✓' : '⏳'}`,
+            description: `${newReadings.length} leituras coletadas`,
+            duration: 800,
           });
         } else {
-          console.log(`📊 PESO DETECTADO MAS NÃO PESANDO: ${weight.toFixed(2)}kg`);
+          console.log(`📊 Peso detectado fora de pesagem: ${weight.toFixed(2)}kg`);
         }
-        
-      } else {
-        console.log('⚠️ Característica desconhecida ou tamanho inadequado');
-        console.log(`   UUID: ${target.characteristic?.uuid}`);
-        console.log(`   Bytes: ${value.byteLength}`);
+
+      } catch (parseError) {
+        console.error('❌ Erro ao interpretar dados:', parseError);
       }
-      
+
     } catch (error) {
-      console.error('❌ ERRO CRÍTICO ao processar dados:', error);
+      console.error('❌ ERRO CRÍTICO em handleWeightMeasurement:', error);
+      // Não fazer nada drástico, apenas logar o erro
     }
   };
 
