@@ -18,6 +18,7 @@ import { useDadosSaude } from "@/hooks/useDadosSaude";
 import { AtualizarMedidasModal } from "./AtualizarMedidasModal";
 import GraficosProgressoSaude from "./GraficosProgressoSaude";
 import { AvaliacaoRiscoCardiometabolico } from "./AvaliacaoRiscoCardiometabolico";
+import { BalancaPareamentoCompacto } from "./BalancaPareamentoCompacto";
 
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar } from 'recharts';
 
@@ -149,13 +150,16 @@ export const BeneficiosVisuais: React.FC = () => {
               <p className="text-muted-foreground mb-4">
                 Para ver sua evolução personalizada, registre seus dados de saúde
               </p>
-              <AtualizarMedidasModal 
-                trigger={
-                  <Button className="bg-instituto-orange hover:bg-instituto-orange/90">
-                    Registrar Medidas
-                  </Button>
-                }
-              />
+              <div className="flex gap-3 justify-center">
+                <AtualizarMedidasModal 
+                  trigger={
+                    <Button className="bg-instituto-orange hover:bg-instituto-orange/90">
+                      Registrar Medidas
+                    </Button>
+                  }
+                />
+                <BalancaPareamentoCompacto />
+              </div>
             </CardContent>
           </Card>
         )}
@@ -340,8 +344,13 @@ export const BeneficiosVisuais: React.FC = () => {
         </div>
       </div>
 
-      {/* Botão Flutuante */}
-      {dadosSaude && <AtualizarMedidasModal />}
+      {/* Opções de Atualização de Medidas */}
+      {dadosSaude && (
+        <div className="fixed bottom-6 right-6 flex flex-col gap-3">
+          <AtualizarMedidasModal />
+          <BalancaPareamentoCompacto />
+        </div>
+      )}
     </div>
   );
 };
